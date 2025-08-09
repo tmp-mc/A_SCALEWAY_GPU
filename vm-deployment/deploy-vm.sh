@@ -147,9 +147,6 @@ install_system_dependencies() {
         libgl1-mesa-dev \
         libglu1-mesa-dev
     
-    # Upgrade pip
-    python3 -m pip install --user --upgrade pip
-    
     log_info "System dependencies installed"
 }
 
@@ -167,14 +164,40 @@ create_project_structure() {
 setup_python_environment() {
     log_step "Setting up Python virtual environment..."
     
+    # Remove existing environment if it exists
+    if [[ -d "$PYTHON_ENV" ]]; then
+        log_warn "Removing existing virtual environment"
+        rm -rf "$PYTHON_ENV"
+    fi
+    
     # Create virtual environment
-    python3 -m venv "$PYTHON_ENV"
+    if ! python3 -m venv "$PYTHON_ENV"; then
+        log_error "Failed to create virtual environment"
+        log_error "Make sure python3-venv is installed: sudo apt install python3-venv python3-full"
+        exit 1
+    fi
+    
+    # Activate virtual environment
     source "$PYTHON_ENV/bin/activate"
     
-    # Upgrade pip and essential tools
+    # Verify activation worked
+    if [[ "$VIRTUAL_ENV" != "$PYTHON_ENV" ]]; then
+        log_error "Virtual environment activation failed"
+        exit 1
+    fi
+    
+    # Upgrade pip and essential tools (safe inside venv)
     pip install --upgrade pip setuptools wheel
     
-    log_info "Python virtual environment created"
+    # Verify pip is working in venv
+    pip_location=$(which pip)
+    if [[ "$pip_location" != "$PYTHON_ENV/bin/pip" ]]; then
+        log_error "pip is not using virtual environment: $pip_location"
+        exit 1
+    fi
+    
+    log_info "Python virtual environment created and verified: $PYTHON_ENV"
+    log_info "Using pip: $pip_location"
 }
 
 install_pytorch() {
