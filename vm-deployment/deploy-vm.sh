@@ -154,9 +154,13 @@ install_nvidia_drivers() {
     
     # Check if nvidia-smi already works
     if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
-        local driver_version=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)
-        log_info "NVIDIA drivers already installed: $driver_version"
-        return 0
+        local driver_version
+        if driver_version=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$driver_version" ]] && [[ "$driver_version" =~ ^[0-9]+\.[0-9]+ ]]; then
+            log_info "NVIDIA drivers already installed: $driver_version"
+            return 0
+        else
+            log_warn "nvidia-smi exists but returned invalid driver version, proceeding with installation"
+        fi
     fi
     
     # Install recommended drivers
@@ -286,13 +290,21 @@ verify_cuda_installation() {
     local cuda_version=$(nvcc --version | grep "release" | grep -o "V[0-9]\+\.[0-9]\+" | sed 's/V//')
     log_info "CUDA compiler version: $cuda_version"
     
-    # Check nvidia-smi
+    # Check nvidia-smi with robust error handling
     if command -v nvidia-smi &> /dev/null; then
-        local gpu_info=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)
-        log_info "GPU detected: $gpu_info"
+        local gpu_info
+        if gpu_info=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_info" ]] && [[ ! "$gpu_info" =~ "Failed to initialize NVML" ]]; then
+            log_info "GPU detected: $gpu_info"
+        else
+            log_warn "nvidia-smi failed to query GPU info (driver/library version mismatch possible)"
+        fi
         
-        local driver_version=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)
-        log_info "Driver version: $driver_version"
+        local driver_version
+        if driver_version=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$driver_version" ]] && [[ "$driver_version" =~ ^[0-9]+\.[0-9]+ ]]; then
+            log_info "Driver version: $driver_version"
+        else
+            log_warn "nvidia-smi failed to query driver version (driver/library version mismatch possible)"
+        fi
     else
         log_error "nvidia-smi not working"
         return 1
@@ -545,7 +557,7 @@ echo "🐍 Python: $(python --version)"
 echo "🔥 PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'Not available')"
 echo "⚡ CUDA: $(python -c 'import torch; print("Available" if torch.cuda.is_available() else "Not available")' 2>/dev/null)"
 echo "📷 COLMAP: $(colmap --version 2>&1 | head -1 || echo 'Not available')"
-echo "🎮 GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)"
+echo "🎮 GPU: $(if command -v nvidia-smi &> /dev/null; then gpu_info=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_info" ]] && [[ ! "$gpu_info" =~ "Failed to initialize NVML" ]] && echo "$gpu_info" || echo "GPU query failed (driver/library version mismatch possible)"; else echo "nvidia-smi not available"; fi)"
 EOF
 
     chmod +x "$PROJECT_DIR/activate.sh"
@@ -556,8 +568,27 @@ EOF
 create_configuration() {
     log_step "Creating project configuration..."
     
-    # Detect GPU memory
-    local gpu_memory_mb=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 || echo "24576")
+    # Detect GPU memory with robust error handling
+    local gpu_memory_mb="24576"  # Default fallback
+    if command -v nvidia-smi &> /dev/null; then
+        local smi_output
+        if smi_output=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null) && [[ -n "$smi_output" ]]; then
+            # Validate that output is numeric and not an error message
+            if [[ "$smi_output" =~ ^[0-9]+$ ]]; then
+                gpu_memory_mb="$smi_output"
+                log_info "GPU memory detected: ${gpu_memory_mb}MB"
+            else
+                log_warn "nvidia-smi returned non-numeric output: $smi_output"
+                log_warn "Using default GPU memory: ${gpu_memory_mb}MB"
+            fi
+        else
+            log_warn "nvidia-smi failed or returned empty output"
+            log_warn "This may indicate driver/library version mismatch or missing GPU"
+            log_warn "Using default GPU memory: ${gpu_memory_mb}MB"
+        fi
+    else
+        log_warn "nvidia-smi not found, using default GPU memory: ${gpu_memory_mb}MB"
+    fi
     local gpu_memory_gb=$((gpu_memory_mb / 1024))
     
     cat > "$PROJECT_DIR/.env" << EOF
@@ -633,11 +664,38 @@ echo ""
 # GPU Information
 echo "🎮 GPU Information:"
 if command -v nvidia-smi &> /dev/null; then
-    echo "   Driver: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)"
-    echo "   GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
-    echo "   Memory: $(nvidia-smi --query-gpu=memory.total --format=csv,noheader | head -1)"
-    echo "   Temperature: $(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader | head -1)°C"
-    echo "   Utilization: $(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader | head -1)"
+    # Robust nvidia-smi queries with error handling
+    local driver_ver gpu_name gpu_mem gpu_temp gpu_util
+    
+    if driver_ver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$driver_ver" ]] && [[ "$driver_ver" =~ ^[0-9]+\.[0-9]+ ]]; then
+        echo "   Driver: $driver_ver"
+    else
+        echo "   Driver: ❌ Failed to query (driver/library version mismatch possible)"
+    fi
+    
+    if gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_name" ]] && [[ ! "$gpu_name" =~ "Failed to initialize NVML" ]]; then
+        echo "   GPU: $gpu_name"
+    else
+        echo "   GPU: ❌ Failed to query (driver/library version mismatch possible)"
+    fi
+    
+    if gpu_mem=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_mem" ]] && [[ ! "$gpu_mem" =~ "Failed to initialize NVML" ]]; then
+        echo "   Memory: $gpu_mem"
+    else
+        echo "   Memory: ❌ Failed to query (driver/library version mismatch possible)"
+    fi
+    
+    if gpu_temp=$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_temp" ]] && [[ "$gpu_temp" =~ ^[0-9]+$ ]]; then
+        echo "   Temperature: ${gpu_temp}°C"
+    else
+        echo "   Temperature: ❌ Failed to query (driver/library version mismatch possible)"
+    fi
+    
+    if gpu_util=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_util" ]] && [[ ! "$gpu_util" =~ "Failed to initialize NVML" ]]; then
+        echo "   Utilization: $gpu_util"
+    else
+        echo "   Utilization: ❌ Failed to query (driver/library version mismatch possible)"
+    fi
 else
     echo "   ❌ NVIDIA drivers not found"
 fi
@@ -769,9 +827,20 @@ display_completion_summary() {
     log_header "🎉 DEPLOYMENT COMPLETED SUCCESSFULLY!"
     echo ""
     
-    # Get system info
-    local gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
-    local gpu_mem=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | head -1)
+    # Get system info with robust error handling
+    local gpu_name="Unknown GPU"
+    local gpu_mem="Unknown Memory"
+    if command -v nvidia-smi &> /dev/null; then
+        local gpu_info
+        if gpu_info=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_info" ]] && [[ ! "$gpu_info" =~ "Failed to initialize NVML" ]]; then
+            gpu_name="$gpu_info"
+        fi
+        
+        local mem_info
+        if mem_info=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$mem_info" ]] && [[ ! "$mem_info" =~ "Failed to initialize NVML" ]]; then
+            gpu_mem="$mem_info"
+        fi
+    fi
     local cuda_version=$(nvcc --version | grep "release" | grep -o "V[0-9]\+\.[0-9]\+" | sed 's/V//')
     
     echo -e "${YELLOW}🖥️  System Configuration:${NC}"
