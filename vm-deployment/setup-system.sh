@@ -97,17 +97,46 @@ install_essential_tools() {
 }
 
 install_cuda() {
-    log_step "Installing CUDA 12.6..."
+    log_step "Checking CUDA installation..."
     
-    # Check if CUDA is already installed
-    if command -v nvcc &> /dev/null && nvcc --version | grep -q "12.6"; then
-        log_info "CUDA 12.6 already installed ✓"
-        return 0
+    # Check if CUDA is already installed and working
+    if command -v nvcc &> /dev/null; then
+        local cuda_version=$(nvcc --version 2>/dev/null | grep "release" | grep -o "V[0-9]\+\.[0-9]\+" | sed 's/V//' || echo "unknown")
+        log_info "Found existing CUDA version: $cuda_version"
+        
+        # Check if it's a compatible version (12.x)
+        if [[ "$cuda_version" =~ ^12\. ]]; then
+            log_info "Compatible CUDA version already installed ✓"
+            setup_cuda_environment
+            return 0
+        else
+            log_warn "CUDA version $cuda_version may not be optimal (recommended: 12.6+)"
+            read -p "Continue with existing CUDA installation? (Y/n): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                setup_cuda_environment
+                return 0
+            fi
+        fi
     fi
     
+    log_step "Installing CUDA 12.6..."
+    
+    # Clean up any conflicting CUDA repositories
+    cleanup_cuda_repositories
+    
     # Download and install CUDA keyring
-    wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
-    sudo dpkg -i cuda-keyring_1.1-1_all.deb
+    if ! wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb; then
+        log_error "Failed to download CUDA keyring"
+        return 1
+    fi
+    
+    # Install keyring with error handling
+    if ! sudo dpkg -i cuda-keyring_1.1-1_all.deb 2>/dev/null; then
+        log_warn "Keyring installation had conflicts, attempting to fix..."
+        cleanup_cuda_repositories
+        sudo dpkg -i cuda-keyring_1.1-1_all.deb
+    fi
     rm cuda-keyring_1.1-1_all.deb
     
     # Update package lists
@@ -116,13 +145,58 @@ install_cuda() {
     # Install CUDA toolkit
     sudo apt install -y cuda-toolkit-12-6 cuda-drivers
     
-    # Set up environment
-    echo 'export PATH=/usr/local/cuda-12.6/bin:$PATH' >> ~/.bashrc
-    echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
-    export PATH=/usr/local/cuda-12.6/bin:$PATH
-    export LD_LIBRARY_PATH=/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH
-    
+    setup_cuda_environment
     log_info "CUDA 12.6 installed"
+}
+
+cleanup_cuda_repositories() {
+    log_step "Cleaning up conflicting CUDA repositories..."
+    
+    # Remove conflicting repository files
+    sudo rm -f /etc/apt/sources.list.d/cuda*.list
+    sudo rm -f /etc/apt/sources.list.d/nvidia*.list
+    
+    # Remove conflicting keyrings
+    sudo rm -f /usr/share/keyrings/cudatools.gpg
+    sudo rm -f /usr/share/keyrings/nvidia*.gpg
+    
+    # Clean apt cache
+    sudo apt clean
+    sudo apt update -qq 2>/dev/null || true
+    
+    log_info "Repository cleanup completed"
+}
+
+setup_cuda_environment() {
+    log_step "Setting up CUDA environment..."
+    
+    # Find CUDA installation directory
+    local cuda_dir=""
+    if [[ -d "/usr/local/cuda-12.6" ]]; then
+        cuda_dir="/usr/local/cuda-12.6"
+    elif [[ -d "/usr/local/cuda" ]]; then
+        cuda_dir="/usr/local/cuda"
+    elif command -v nvcc &> /dev/null; then
+        cuda_dir=$(dirname $(dirname $(which nvcc)))
+    fi
+    
+    if [[ -n "$cuda_dir" && -d "$cuda_dir" ]]; then
+        # Check if environment is already set up
+        if ! grep -q "CUDA_HOME" ~/.bashrc; then
+            echo "export CUDA_HOME=$cuda_dir" >> ~/.bashrc
+            echo "export PATH=\$CUDA_HOME/bin:\$PATH" >> ~/.bashrc
+            echo "export LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\$LD_LIBRARY_PATH" >> ~/.bashrc
+        fi
+        
+        # Set for current session
+        export CUDA_HOME="$cuda_dir"
+        export PATH="$cuda_dir/bin:$PATH"
+        export LD_LIBRARY_PATH="$cuda_dir/lib64:$LD_LIBRARY_PATH"
+        
+        log_info "CUDA environment configured: $cuda_dir"
+    else
+        log_warn "Could not locate CUDA installation directory"
+    fi
 }
 
 verify_gpu() {
@@ -202,13 +276,15 @@ setup_directories() {
 create_environment_profile() {
     log_step "Setting up environment profile..."
     
+    # Check if profile is already configured
+    if grep -q "3D Reconstruction Pipeline Environment" ~/.bashrc; then
+        log_info "Environment profile already exists, skipping"
+        return 0
+    fi
+    
     cat >> ~/.bashrc << 'EOF'
 
 # 3D Reconstruction Pipeline Environment
-export CUDA_HOME=/usr/local/cuda-12.6
-export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
-
 # Optimization settings for RTX 4090
 export OMP_NUM_THREADS=16
 export MKL_NUM_THREADS=16
