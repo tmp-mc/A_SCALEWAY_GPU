@@ -81,13 +81,20 @@ create_python_environment() {
         return 0
     fi
     
-    python3 -m venv "$PYTHON_ENV"
+    # Create virtual environment (this avoids externally-managed-environment errors)
+    if ! python3 -m venv "$PYTHON_ENV"; then
+        log_error "Failed to create virtual environment"
+        log_error "Make sure python3-venv is installed: sudo apt install python3-venv python3-full"
+        exit 1
+    fi
+    
     source "$PYTHON_ENV/bin/activate"
     
-    # Upgrade pip and essential tools
+    # Upgrade pip and essential tools inside the virtual environment (safe)
     pip install --upgrade pip setuptools wheel
     
     log_info "Python virtual environment created: $PYTHON_ENV"
+    log_info "All Python packages will be installed in this isolated environment"
 }
 
 install_pytorch() {

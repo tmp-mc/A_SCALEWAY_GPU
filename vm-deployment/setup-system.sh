@@ -226,12 +226,15 @@ install_python_system_deps() {
         python3-pip \
         python3-venv \
         python3-wheel \
-        python3-setuptools
+        python3-setuptools \
+        python3-full \
+        pipx
     
-    # Upgrade pip
-    python3 -m pip install --user --upgrade pip
+    # Note: We don't upgrade pip system-wide to avoid externally-managed-environment errors
+    # Pip will be upgraded inside virtual environments where it's safe
     
     log_info "Python 3 system dependencies installed"
+    log_info "Virtual environment tools ready (python3-venv, pipx)"
 }
 
 install_colmap_system_deps() {
