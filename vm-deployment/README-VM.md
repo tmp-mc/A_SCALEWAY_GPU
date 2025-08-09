@@ -1,78 +1,86 @@
-# 3D Reconstruction Pipeline - VM Deployment
+# 3D Reconstruction Pipeline - Unified Deployment
 
-**Optimized for Ubuntu 24.04 Noble Wombat + NVIDIA L4 GPU (24GB)**
+**Complete Ubuntu 24.04 + CUDA 12.6 + GPU Setup from Scratch**
 
-This streamlined deployment script sets up a complete 3D reconstruction pipeline on a VM with pre-installed NVIDIA drivers and CUDA toolkit.
+This unified deployment script handles everything from system setup to complete 3D reconstruction environment, including fixing common CUDA installation issues.
 
-## 🎯 Target Environment
+## 🎯 What This Fixes
 
-- **OS**: Ubuntu 24.04 LTS (Noble Wombat)
-- **GPU**: NVIDIA L4 (24GB VRAM)
-- **Architecture**: Ada Lovelace (CUDA Compute Capability 8.9)
-- **Prerequisites**: NVIDIA drivers and CUDA toolkit already installed
+**Your CUDA Issues:**
+- ❌ `nvcc --version` → Command 'nvcc' not found
+- ❌ `systemctl restart nvidia-persistenced.service` → Job failed
+- ❌ Incomplete CUDA installations
+- ❌ Repository conflicts and keyring issues
 
-## 🚀 Quick Start
+**After Running This Script:**
+- ✅ `nvcc --version` works properly
+- ✅ `nvidia-smi` shows CUDA version
+- ✅ nvidia-persistenced service runs correctly
+- ✅ PyTorch detects GPU acceleration
+- ✅ COLMAP builds with CUDA support
 
-### 1. Prerequisites Check
-Ensure your VM has:
-```bash
-# Check NVIDIA drivers
-nvidia-smi
+## 🚀 One-Command Solution
 
-# Check CUDA (any version is fine)
-nvcc --version
-# OR check if CUDA is installed anywhere
-find /usr -name "nvcc" 2>/dev/null
-```
-
-### 2. One-Command Deployment
+### Quick Start
 ```bash
 cd vm-deployment
 chmod +x deploy-vm.sh
 ./deploy-vm.sh
 ```
 
-### 3. Activate Environment
-```bash
-source ~/3d-reconstruction/activate.sh
-```
+That's it! The script handles everything:
+- Complete CUDA cleanup and fresh installation
+- NVIDIA driver fixes and service configuration
+- Python environment with GPU-accelerated packages
+- COLMAP build with GPU optimization
+- Project structure and configuration
 
-### 4. Check Status
-```bash
-~/3d-reconstruction/check-status.sh
-```
+## 📦 Complete Installation Includes
 
-## 📦 What Gets Installed
+### System Setup
+- Ubuntu 24.04 compatibility checks
+- System updates and essential build tools
+- Complete CUDA 12.6 installation from scratch
+- NVIDIA driver installation and service fixes
 
-### System Dependencies
-- Build tools (cmake, ninja, gcc)
-- Python 3.12 + development headers
-- COLMAP dependencies (Boost, Eigen, OpenCV, etc.)
+### CUDA Environment
+- **Complete cleanup** of existing installations
+- **Fresh CUDA 12.6** installation with proper keyring
+- **Environment configuration** (CUDA_HOME, PATH, LD_LIBRARY_PATH)
+- **Service fixes** for nvidia-persistenced
+- **Verification** that nvcc and nvidia-smi work
 
 ### Python Environment
-- **PyTorch** with CUDA 12.x support (auto-detects CUDA version)
+- **Python 3.12** virtual environment
+- **PyTorch** with CUDA 12.x support
 - **gsplat** - GPU-accelerated Gaussian splatting
 - **Scientific stack** - NumPy, SciPy, OpenCV, etc.
 - **3D processing** - Open3D, Trimesh, PLY support
 
 ### COLMAP
-- Built from source with L4 GPU optimization
-- CUDA Architecture 8.9 (Ada Lovelace)
+- Built from source with GPU optimization
+- CUDA Architecture 8.9 (RTX 4090/L4 GPU)
 - Full GUI and OpenGL support
+- Verified CUDA integration
 
-## 🎮 L4 GPU Optimizations
+## 🔧 Advanced Options
 
-The deployment automatically configures:
+```bash
+# Show help and options
+./deploy-vm.sh --help
 
-- **CUDA Architecture**: 8.9 for Ada Lovelace
-- **Memory Settings**: Optimized for 24GB VRAM
-- **Batch Sizes**: Configured for high-resolution processing
-- **Mixed Precision**: Enabled for faster training
-- **Image Processing**: Up to 4K resolution support
+# Only cleanup existing CUDA (useful for troubleshooting)
+./deploy-vm.sh --cleanup-only
 
-## 📁 Project Structure
+# Only run verification tests
+./deploy-vm.sh --verify-only
 
-After deployment:
+# Show system status
+./deploy-vm.sh --status
+```
+
+## 📁 Project Structure After Deployment
+
 ```
 ~/3d-reconstruction/
 ├── activate.sh              # Environment activation
@@ -92,35 +100,39 @@ After deployment:
 └── run-reconstruction.sh    # Main pipeline
 ```
 
-## 🔧 Configuration
+## 🎮 GPU Optimizations
 
-The deployment creates optimized settings in `~/3d-reconstruction/.env`:
+The deployment automatically configures:
 
-```bash
-# L4 GPU Configuration (24GB VRAM)
-USE_GPU=true
-CUDA_DEVICE=0
-GPU_MEMORY_GB=24
-
-# Processing Settings
-MAX_IMAGE_SIZE=4096
-COLMAP_QUALITY=high
-GAUSSIAN_ITERATIONS=30000
-BATCH_SIZE=8
-
-# L4 Optimizations
-CUDA_MEMORY_FRACTION=0.9
-ENABLE_MIXED_PRECISION=true
-ENABLE_CUDNN_BENCHMARK=true
-```
+- **CUDA Architecture**: 8.9 for RTX 4090/L4 GPU
+- **Memory Settings**: Auto-detected GPU memory optimization
+- **Batch Sizes**: Configured for high-resolution processing
+- **Mixed Precision**: Enabled for faster training
+- **Service Fixes**: nvidia-persistenced properly configured
 
 ## 🧪 Usage Examples
 
-### Basic Reconstruction
+### Activate Environment
 ```bash
-# Activate environment
 source ~/3d-reconstruction/activate.sh
+```
 
+### Check System Status
+```bash
+~/3d-reconstruction/check-status.sh
+```
+
+### Verify CUDA Installation
+```bash
+# These should all work after deployment
+nvcc --version
+nvidia-smi
+python -c "import torch; print(torch.cuda.is_available())"
+colmap --help | grep CUDA
+```
+
+### Run Reconstruction
+```bash
 # Place your images
 cp /path/to/images/* ~/3d-reconstruction/data/images/
 
@@ -129,115 +141,87 @@ cd ~/3d-reconstruction
 ./run-reconstruction.sh
 ```
 
-### Check System Status
-```bash
-~/3d-reconstruction/check-status.sh
-```
+## 🔍 Troubleshooting Your Original Issues
 
-### Manual COLMAP
-```bash
-source ~/3d-reconstruction/activate.sh
-colmap automatic_reconstructor \
-    --image_path ~/3d-reconstruction/data/images \
-    --workspace_path ~/3d-reconstruction/output/colmap
-```
+### nvidia-persistenced Service
+**Before:** `Job for nvidia-persistenced.service failed`
+**After:** Service runs correctly with proper user and permissions
 
-### Python API
-```python
-# Activate environment first: source ~/3d-reconstruction/activate.sh
-import torch
-import gsplat
+**What the script fixes:**
+- Creates nvidia-persistenced user if missing
+- Sets proper directory permissions
+- Configures service dependencies
 
-# Check GPU
-print(f"CUDA available: {torch.cuda.is_available()}")
-print(f"GPU: {torch.cuda.get_device_name(0)}")
-print(f"Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
+### nvcc Command Not Found
+**Before:** `Command 'nvcc' not found, but can be installed with: apt install nvidia-cuda-toolkit`
+**After:** `nvcc --version` shows CUDA 12.6
 
-# Use gsplat for Gaussian splatting
-# Your reconstruction code here...
-```
+**What the script fixes:**
+- Complete CUDA cleanup removes conflicting installations
+- Fresh CUDA 12.6 installation with official repositories
+- Proper PATH and environment variable configuration
+- Symlink creation for standard CUDA paths
 
-## 🔍 Troubleshooting
+### Repository Conflicts
+**Before:** Package conflicts and keyring issues
+**After:** Clean installation with proper repositories
 
-### Common Issues
-
-**NVIDIA drivers not found**
-```bash
-# Check if drivers are installed
-nvidia-smi
-# If not working, install drivers first
-```
-
-**CUDA not detected**
-```bash
-# Find CUDA installation
-find /usr -name "nvcc" 2>/dev/null
-find /opt -name "nvcc" 2>/dev/null
-
-# Check environment
-echo $CUDA_HOME
-echo $PATH | grep cuda
-```
-
-**PyTorch CUDA not working**
-```bash
-source ~/3d-reconstruction/activate.sh
-python -c "import torch; print(torch.cuda.is_available())"
-```
-
-**COLMAP CUDA disabled**
-```bash
-colmap --help | grep CUDA
-# Should show "CUDA enabled"
-```
-
-### Verification Commands
-
-```bash
-# Full system check
-~/3d-reconstruction/check-status.sh
-
-# Verify only
-./deploy-vm.sh --verify-only
-
-# Show help
-./deploy-vm.sh --help
-```
+**What the script fixes:**
+- Removes all conflicting CUDA repositories
+- Cleans up old keyrings and cached packages
+- Installs fresh keyring from NVIDIA
+- Updates package lists properly
 
 ## 📊 Performance Expectations
 
-With L4 GPU (24GB VRAM):
-
+With RTX 4090/L4 GPU:
 - **Image Processing**: Up to 4K resolution
 - **COLMAP**: ~100-500 images in 5-15 minutes
 - **Gaussian Splatting**: 30K iterations in 10-30 minutes
-- **Memory Usage**: Up to 22GB VRAM utilization
-- **Batch Processing**: 8-16 images simultaneously
+- **Memory Usage**: Optimized for available GPU memory
+- **Batch Processing**: Auto-configured batch sizes
 
-## 🔄 Updates
+## 🔄 System Requirements
 
-To update the pipeline:
-```bash
-cd vm-deployment
-git pull
-./deploy-vm.sh  # Re-run deployment
-```
+- **OS**: Ubuntu 24.04 LTS (Noble Wombat)
+- **GPU**: NVIDIA GPU (RTX 4090/L4 optimized)
+- **RAM**: 8+ GB (16+ GB recommended)
+- **Storage**: 30+ GB available space
+- **Network**: Internet connection required
+- **Privileges**: Sudo access needed
 
-## 📞 Support
+## ⏱️ Installation Time
 
-- **Status Check**: `~/3d-reconstruction/check-status.sh`
-- **Logs**: `~/3d-reconstruction/logs/`
-- **Configuration**: `~/3d-reconstruction/.env`
+- **Complete deployment**: 20-45 minutes
+- **CUDA installation**: 10-15 minutes
+- **Python packages**: 5-10 minutes
+- **COLMAP build**: 10-20 minutes
 
-## 🏷️ Version Info
+## 🆘 Support
 
-- **Target OS**: Ubuntu 24.04 Noble Wombat
-- **GPU**: NVIDIA L4 (24GB)
-- **CUDA**: Auto-detected (12.x recommended)
-- **Python**: 3.12
-- **PyTorch**: Latest with CUDA support
-- **COLMAP**: Latest from source
+If deployment fails:
+
+1. **Check logs**: The script provides detailed error messages
+2. **Run status check**: `~/3d-reconstruction/check-status.sh`
+3. **Verify prerequisites**: Ensure Ubuntu 24.04 and sufficient resources
+4. **Clean retry**: Use `./deploy-vm.sh --cleanup-only` then retry
+
+## 🏷️ What's Different
+
+**Old approach (multiple scripts):**
+- `setup-system.sh` - System setup
+- `build-deps.sh` - Dependencies
+- `deploy-vm.sh` - VM-specific deployment
+- Multiple points of failure
+
+**New approach (single script):**
+- `deploy-vm.sh` - Everything in one script
+- Comprehensive error handling
+- Complete CUDA cleanup and installation
+- Fixes your specific nvidia-persistenced and nvcc issues
 
 ---
 
-**Ready for high-performance 3D reconstruction with L4 GPU power! 🚀**
+**Ready to fix your CUDA issues and set up complete 3D reconstruction! 🚀**
+
+Run `./deploy-vm.sh` and watch it solve your nvcc and nvidia-persistenced problems automatically.
