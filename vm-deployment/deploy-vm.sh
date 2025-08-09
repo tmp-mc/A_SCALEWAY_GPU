@@ -22,8 +22,56 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 log_header() { echo -e "${BOLD}${CYAN}$1${NC}"; }
 
+detect_gpu_architecture() {
+    log_step "Detecting GPU architecture..."
+    
+    if command -v nvidia-smi &> /dev/null; then
+        local gpu_name
+        if gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_name" ]] && [[ ! "$gpu_name" =~ "Failed to initialize NVML" ]]; then
+            log_info "Detected GPU: $gpu_name"
+            
+            case "$gpu_name" in
+                *"L4"*)
+                    log_info "L4 GPU detected - using compute capability 8.6"
+                    echo "86"
+                    ;;
+                *"RTX 4090"*|*"RTX 4080"*|*"RTX 4070"*)
+                    log_info "RTX 40-series GPU detected - using compute capability 8.9"
+                    echo "89"
+                    ;;
+                *"A100"*)
+                    log_info "A100 GPU detected - using compute capability 8.0"
+                    echo "80"
+                    ;;
+                *"V100"*)
+                    log_info "V100 GPU detected - using compute capability 7.0"
+                    echo "70"
+                    ;;
+                *"RTX 3090"*|*"RTX 3080"*|*"RTX 3070"*)
+                    log_info "RTX 30-series GPU detected - using compute capability 8.6"
+                    echo "86"
+                    ;;
+                *"RTX 2080"*|*"RTX 2070"*)
+                    log_info "RTX 20-series GPU detected - using compute capability 7.5"
+                    echo "75"
+                    ;;
+                *)
+                    log_warn "Unknown GPU model: $gpu_name"
+                    log_warn "Using 'native' architecture detection - CMake will auto-detect"
+                    echo "native"
+                    ;;
+            esac
+        else
+            log_warn "Could not query GPU name - using native architecture detection"
+            echo "native"
+        fi
+    else
+        log_warn "nvidia-smi not available - using native architecture detection"
+        echo "native"
+    fi
+}
+
 # Configuration
-GPU_ARCH="89"  # RTX 4090/L4 Ada Lovelace architecture
 PROJECT_DIR="$HOME/3d-reconstruction"
 PYTHON_ENV="$PROJECT_DIR/venv"
 BUILD_DIR="/tmp/colmap-build"
@@ -483,33 +531,112 @@ build_colmap() {
         return 0
     fi
     
+    # Detect GPU architecture
+    local gpu_arch=$(detect_gpu_architecture)
+    log_info "Using GPU architecture: $gpu_arch"
+    
+    # Verify CUDA environment before building
+    if ! command -v nvcc &> /dev/null; then
+        log_error "CUDA toolkit not found - cannot build COLMAP with CUDA support"
+        return 1
+    fi
+    
+    # Source CUDA environment
+    if [[ -f ~/.bashrc ]]; then
+        source ~/.bashrc
+    fi
+    
     # Create build directory
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
     
     # Clone COLMAP
+    log_info "Cloning COLMAP repository..."
     git clone https://github.com/colmap/colmap.git
     cd colmap
     
     # Create build directory
     mkdir -p build && cd build
     
-    # Configure with CMake - optimized for RTX 4090/L4 GPU
-    cmake .. \
-        -GNinja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCUDA_ENABLED=ON \
-        -DCMAKE_CUDA_ARCHITECTURES="$GPU_ARCH" \
-        -DGUI_ENABLED=ON \
-        -DOPENGL_ENABLED=ON \
-        -DCGAL_ENABLED=ON \
+    # Configure CMake with GPU-specific optimizations
+    log_info "Configuring CMake with CUDA architecture: $gpu_arch"
+    
+    local cmake_args=(
+        -GNinja
+        -DCMAKE_BUILD_TYPE=Release
+        -DCUDA_ENABLED=ON
+        -DGUI_ENABLED=ON
+        -DOPENGL_ENABLED=ON
+        -DCGAL_ENABLED=ON
         -DCMAKE_INSTALL_PREFIX=/usr/local
+    )
+    
+    # Set CUDA architecture
+    if [[ "$gpu_arch" == "native" ]]; then
+        cmake_args+=(-DCMAKE_CUDA_ARCHITECTURES=native)
+        log_info "Using native CUDA architecture detection"
+    else
+        cmake_args+=(-DCMAKE_CUDA_ARCHITECTURES="$gpu_arch")
+        
+        # Add GPU-specific NVCC flags
+        case "$gpu_arch" in
+            "86")
+                cmake_args+=(-DCUDA_NVCC_FLAGS="-arch=sm_86 --use_fast_math")
+                log_info "L4/RTX 30-series optimizations enabled"
+                ;;
+            "89")
+                cmake_args+=(-DCUDA_NVCC_FLAGS="-arch=sm_89 --use_fast_math")
+                log_info "RTX 40-series optimizations enabled"
+                ;;
+            "80")
+                cmake_args+=(-DCUDA_NVCC_FLAGS="-arch=sm_80 --use_fast_math")
+                log_info "A100 optimizations enabled"
+                ;;
+            "75")
+                cmake_args+=(-DCUDA_NVCC_FLAGS="-arch=sm_75 --use_fast_math")
+                log_info "RTX 20-series optimizations enabled"
+                ;;
+        esac
+    fi
+    
+    # Run CMake configuration
+    if ! cmake .. "${cmake_args[@]}"; then
+        log_error "CMake configuration failed"
+        log_error "This might be due to missing dependencies or CUDA issues"
+        cd /
+        rm -rf "$BUILD_DIR"
+        return 1
+    fi
+    
+    # Verify CUDA was found by CMake
+    if ! grep -q "CUDA_ENABLED.*ON" CMakeCache.txt 2>/dev/null; then
+        log_error "CMake did not enable CUDA support"
+        log_error "Check CUDA installation and environment variables"
+        cd /
+        rm -rf "$BUILD_DIR"
+        return 1
+    fi
+    
+    log_info "CMake configuration successful - CUDA support enabled"
     
     # Build with all available cores
-    ninja -j$(nproc)
+    log_info "Building COLMAP (this may take 10-30 minutes)..."
+    if ! ninja -j$(nproc); then
+        log_error "COLMAP build failed"
+        log_error "Check build logs above for specific errors"
+        cd /
+        rm -rf "$BUILD_DIR"
+        return 1
+    fi
     
     # Install
-    sudo ninja install
+    log_info "Installing COLMAP..."
+    if ! sudo ninja install; then
+        log_error "COLMAP installation failed"
+        cd /
+        rm -rf "$BUILD_DIR"
+        return 1
+    fi
     
     # Update library cache
     sudo ldconfig
@@ -519,10 +646,20 @@ build_colmap() {
     rm -rf "$BUILD_DIR"
     
     # Verify COLMAP installation
-    if colmap --help | grep -q "CUDA enabled"; then
-        log_info "COLMAP built successfully with CUDA support"
+    if command -v colmap &> /dev/null; then
+        local colmap_version=$(colmap --version 2>&1 | head -1 || echo "Unknown")
+        log_info "COLMAP installed: $colmap_version"
+        
+        if colmap --help 2>&1 | grep -q "CUDA enabled"; then
+            log_info "COLMAP built successfully with CUDA support ✓"
+            log_info "GPU architecture $gpu_arch optimization applied"
+        else
+            log_warn "COLMAP built but CUDA support verification failed"
+            log_warn "COLMAP may still work but without GPU acceleration"
+        fi
     else
-        log_warn "COLMAP built but CUDA support may not be enabled"
+        log_error "COLMAP installation verification failed"
+        return 1
     fi
 }
 
@@ -568,8 +705,11 @@ EOF
 create_configuration() {
     log_step "Creating project configuration..."
     
-    # Detect GPU memory with robust error handling
-    local gpu_memory_mb="24576"  # Default fallback
+    # Detect GPU architecture and memory
+    local gpu_arch=$(detect_gpu_architecture)
+    local gpu_memory_mb="24576"  # Default fallback for L4
+    local gpu_name="Unknown GPU"
+    
     if command -v nvidia-smi &> /dev/null; then
         local smi_output
         if smi_output=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null) && [[ -n "$smi_output" ]]; then
@@ -586,30 +726,91 @@ create_configuration() {
             log_warn "This may indicate driver/library version mismatch or missing GPU"
             log_warn "Using default GPU memory: ${gpu_memory_mb}MB"
         fi
+        
+        # Get GPU name
+        local name_output
+        if name_output=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null) && [[ -n "$name_output" ]] && [[ ! "$name_output" =~ "Failed to initialize NVML" ]]; then
+            gpu_name="$name_output"
+        fi
     else
         log_warn "nvidia-smi not found, using default GPU memory: ${gpu_memory_mb}MB"
     fi
+    
     local gpu_memory_gb=$((gpu_memory_mb / 1024))
+    
+    # Set GPU-specific optimizations
+    local batch_size=8
+    local max_image_size=4096
+    local memory_fraction="0.85"
+    local cache_size_gb=8
+    
+    case "$gpu_arch" in
+        "86")  # L4 and RTX 30-series
+            if [[ "$gpu_name" =~ "L4" ]]; then
+                batch_size=12
+                max_image_size=4096
+                memory_fraction="0.85"  # Conservative for L4
+                cache_size_gb=12
+                log_info "L4 GPU optimizations applied"
+            else
+                batch_size=10
+                max_image_size=4096
+                memory_fraction="0.9"
+                cache_size_gb=10
+                log_info "RTX 30-series optimizations applied"
+            fi
+            ;;
+        "89")  # RTX 40-series
+            batch_size=16
+            max_image_size=4096
+            memory_fraction="0.9"
+            cache_size_gb=16
+            log_info "RTX 40-series optimizations applied"
+            ;;
+        "80")  # A100
+            batch_size=20
+            max_image_size=4096
+            memory_fraction="0.95"
+            cache_size_gb=20
+            log_info "A100 optimizations applied"
+            ;;
+        *)
+            log_info "Using default GPU optimizations"
+            ;;
+    esac
     
     cat > "$PROJECT_DIR/.env" << EOF
 # 3D Reconstruction Pipeline Configuration
-# GPU Optimized Settings
+# GPU Optimized Settings for $gpu_name
 
 # GPU Configuration
 USE_GPU=true
 CUDA_DEVICE=0
 GPU_MEMORY_GB=$gpu_memory_gb
+GPU_ARCHITECTURE=$gpu_arch
 
-# Processing Settings
-MAX_IMAGE_SIZE=4096
+# Processing Settings - Optimized for $gpu_name
+MAX_IMAGE_SIZE=$max_image_size
 COLMAP_QUALITY=high
 GAUSSIAN_ITERATIONS=30000
-BATCH_SIZE=8
+BATCH_SIZE=$batch_size
 
 # GPU Optimizations
-CUDA_MEMORY_FRACTION=0.9
+CUDA_MEMORY_FRACTION=$memory_fraction
 ENABLE_MIXED_PRECISION=true
 ENABLE_CUDNN_BENCHMARK=true
+
+# COLMAP Settings
+COLMAP_FEATURE_TYPE=sift
+COLMAP_MATCHER_TYPE=sequential
+COLMAP_CAMERA_MODEL=OPENCV
+ENABLE_DENSE_RECONSTRUCTION=false
+
+# gsplat Settings
+GSPLAT_ENABLE_ABSGRAD=true
+GSPLAT_ENABLE_ANTIALIASING=true
+GSPLAT_ENABLE_MCMC=false
+GSPLAT_MCMC_CAP=1000000
 
 # Output Settings
 OUTPUT_FORMAT=ply
@@ -618,12 +819,21 @@ COMPRESSION_LEVEL=6
 
 # Performance Settings
 PARALLEL_WORKERS=16
-CACHE_SIZE_GB=8
+CACHE_SIZE_GB=$cache_size_gb
+
+# Bunny CDN Settings (configure as needed)
+BUNNY_STORAGE_ZONE=your-storage-zone-name
+BUNNY_API_KEY=your-api-key-here
+BUNNY_INPUT_PATH=inputs
+BUNNY_OUTPUT_PATH=output
+MAX_DOWNLOAD_WORKERS=4
+MAX_UPLOAD_WORKERS=2
+ENABLE_AUTO_UPLOAD=true
 EOF
 
     cp "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.template"
     
-    log_info "Configuration files created"
+    log_info "Configuration files created with $gpu_name optimizations"
 }
 
 copy_pipeline_scripts() {
@@ -867,8 +1077,20 @@ display_completion_summary() {
     echo "      ${CYAN}cd ~/3d-reconstruction && ./run-reconstruction.sh${NC}"
     echo ""
     
+    # Get GPU architecture for display
+    local gpu_arch=$(detect_gpu_architecture)
+    local arch_name="Unknown"
+    case "$gpu_arch" in
+        "86") arch_name="Ada Lovelace (L4/RTX 30-series)" ;;
+        "89") arch_name="Ada Lovelace (RTX 40-series)" ;;
+        "80") arch_name="Ampere (A100)" ;;
+        "75") arch_name="Turing (RTX 20-series)" ;;
+        "70") arch_name="Volta (V100)" ;;
+        *) arch_name="Auto-detected" ;;
+    esac
+    
     echo -e "${YELLOW}🎯 GPU Optimizations:${NC}"
-    echo "   ✅ CUDA Architecture $GPU_ARCH (Ada Lovelace)"
+    echo "   ✅ CUDA Architecture $gpu_arch ($arch_name)"
     echo "   ✅ GPU memory optimized settings"
     echo "   ✅ High-resolution image processing"
     echo "   ✅ Mixed precision training enabled"
