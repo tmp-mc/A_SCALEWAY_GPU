@@ -30,28 +30,75 @@ print_banner() {
     echo -e "${BLUE}================================================${NC}"
 }
 
+install_cuda_toolkit() {
+    log_step "Installing CUDA toolkit..."
+    
+    # Update package lists
+    sudo apt update -qq
+    
+    # Install CUDA toolkit via apt (simpler than manual installation)
+    sudo apt install -y nvidia-cuda-toolkit
+    
+    # Also try to install CUDA 12.x if available
+    if apt-cache search cuda-toolkit-12 | grep -q cuda-toolkit-12; then
+        sudo apt install -y cuda-toolkit-12-6 2>/dev/null || sudo apt install -y cuda-toolkit-12-4 2>/dev/null || true
+    fi
+    
+    log_info "CUDA toolkit installed"
+}
+
+install_python_deps() {
+    log_step "Installing Python dependencies..."
+    
+    sudo apt update -qq
+    sudo apt install -y \
+        python3 \
+        python3-dev \
+        python3-pip \
+        python3-venv \
+        python3-wheel \
+        python3-setuptools \
+        build-essential
+    
+    log_info "Python dependencies installed"
+}
+
 check_prerequisites() {
     log_step "Checking prerequisites..."
     
-    # Check CUDA
-    if ! command -v nvcc &> /dev/null; then
-        log_error "CUDA not found. Run setup-system.sh first."
+    # Check GPU first
+    if command -v nvidia-smi &> /dev/null; then
+        if nvidia-smi &> /dev/null; then
+            gpu_info=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>/dev/null | head -1)
+            log_info "GPU detected: $gpu_info ✓"
+        else
+            log_error "nvidia-smi failed. Check GPU drivers."
+            exit 1
+        fi
+    else
+        log_error "nvidia-smi not found. Install GPU drivers first."
         exit 1
     fi
     
-    cuda_version=$(nvcc --version | grep "release" | grep -o "V[0-9]\+\.[0-9]\+" | sed 's/V//')
-    log_info "CUDA version: $cuda_version ✓"
+    # Check CUDA toolkit - install if missing
+    if ! command -v nvcc &> /dev/null; then
+        log_warn "CUDA toolkit not found. Installing..."
+        install_cuda_toolkit
+    fi
     
-    # Check GPU
-    if command -v nvidia-smi &> /dev/null; then
-        gpu_count=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null || echo "0")
-        log_info "GPUs detected: $gpu_count ✓"
+    # Verify CUDA after potential installation
+    if command -v nvcc &> /dev/null; then
+        cuda_version=$(nvcc --version | grep "release" | grep -o "V[0-9]\+\.[0-9]\+" | sed 's/V//')
+        log_info "CUDA version: $cuda_version ✓"
+    else
+        log_error "CUDA installation failed"
+        exit 1
     fi
     
     # Check Python
     if ! command -v python3 &> /dev/null; then
-        log_error "Python3 not found. Run setup-system.sh first."
-        exit 1
+        log_warn "Python3 not found. Installing..."
+        install_python_deps
     fi
     
     python_version=$(python3 --version | grep -o "[0-9]\+\.[0-9]\+")
@@ -64,13 +111,47 @@ setup_build_environment() {
     # Create build directory
     mkdir -p "$BUILD_DIR"
     
-    # Source environment variables
-    export CUDA_HOME=/usr/local/cuda-12.6
-    export PATH=$CUDA_HOME/bin:$PATH
-    export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
-    export CUDA_ARCHITECTURES="89"  # RTX 4090 compute capability
+    # Auto-detect CUDA installation path
+    local cuda_home=""
+    if [[ -d "/usr/local/cuda-12.6" ]]; then
+        cuda_home="/usr/local/cuda-12.6"
+    elif [[ -d "/usr/local/cuda-12.4" ]]; then
+        cuda_home="/usr/local/cuda-12.4"
+    elif [[ -d "/usr/local/cuda" ]]; then
+        cuda_home="/usr/local/cuda"
+    elif command -v nvcc &> /dev/null; then
+        # Find CUDA_HOME from nvcc location
+        cuda_home=$(dirname $(dirname $(which nvcc)))
+    else
+        # Fallback for apt-installed CUDA
+        if [[ -d "/usr" ]] && command -v nvcc &> /dev/null; then
+            cuda_home="/usr"
+        fi
+    fi
+    
+    if [[ -n "$cuda_home" ]]; then
+        export CUDA_HOME="$cuda_home"
+        export PATH="$cuda_home/bin:$PATH"
+        
+        # Set LD_LIBRARY_PATH based on CUDA installation type
+        if [[ -d "$cuda_home/lib64" ]]; then
+            export LD_LIBRARY_PATH="$cuda_home/lib64:$LD_LIBRARY_PATH"
+        elif [[ -d "$cuda_home/lib/x86_64-linux-gnu" ]]; then
+            export LD_LIBRARY_PATH="$cuda_home/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+        fi
+        
+        log_info "CUDA_HOME set to: $cuda_home"
+    else
+        log_error "Could not detect CUDA installation path"
+        exit 1
+    fi
+    
+    # Set compute capability for L4 GPU (same as RTX 4090)
+    export CUDA_ARCHITECTURES="89"
     
     log_info "Build environment ready"
+    log_info "CUDA_HOME: $CUDA_HOME"
+    log_info "nvcc location: $(which nvcc 2>/dev/null || echo 'not found')"
 }
 
 create_python_environment() {
@@ -150,7 +231,12 @@ build_colmap() {
     # Create build directory
     mkdir -p build && cd build
     
-    # Configure with CMake - optimized for RTX 4090
+    # Configure with CMake - optimized for L4/RTX 4090
+    local nvcc_path="$CUDA_HOME/bin/nvcc"
+    if [[ ! -f "$nvcc_path" ]]; then
+        nvcc_path=$(which nvcc)
+    fi
+    
     cmake .. \
         -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
@@ -160,7 +246,7 @@ build_colmap() {
         -DOPENGL_ENABLED=ON \
         -DCGAL_ENABLED=ON \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
-        -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.6/bin/nvcc
+        -DCMAKE_CUDA_COMPILER="$nvcc_path"
     
     # Build (parallel build based on CPU cores)
     ninja -j$(nproc)
@@ -230,10 +316,28 @@ create_activation_script() {
 # Activate Python virtual environment
 source "$PYTHON_ENV/bin/activate"
 
-# Set environment variables
-export CUDA_HOME=/usr/local/cuda-12.6
+# Auto-detect CUDA installation path
+if [[ -d "/usr/local/cuda-12.6" ]]; then
+    export CUDA_HOME="/usr/local/cuda-12.6"
+elif [[ -d "/usr/local/cuda-12.4" ]]; then
+    export CUDA_HOME="/usr/local/cuda-12.4"
+elif [[ -d "/usr/local/cuda" ]]; then
+    export CUDA_HOME="/usr/local/cuda"
+elif command -v nvcc &> /dev/null; then
+    export CUDA_HOME=\$(dirname \$(dirname \$(which nvcc)))
+else
+    export CUDA_HOME="/usr"
+fi
+
+# Set CUDA paths
 export PATH=\$CUDA_HOME/bin:\$PATH
-export LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\$LD_LIBRARY_PATH
+
+# Set LD_LIBRARY_PATH based on CUDA installation type
+if [[ -d "\$CUDA_HOME/lib64" ]]; then
+    export LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\$LD_LIBRARY_PATH
+elif [[ -d "\$CUDA_HOME/lib/x86_64-linux-gnu" ]]; then
+    export LD_LIBRARY_PATH=\$CUDA_HOME/lib/x86_64-linux-gnu:\$LD_LIBRARY_PATH
+fi
 
 # Optimization settings
 export OMP_NUM_THREADS=16
@@ -249,6 +353,7 @@ export RECONSTRUCTION_OUTPUT=\$RECONSTRUCTION_HOME/output
 export RECONSTRUCTION_CACHE=\$RECONSTRUCTION_HOME/cache
 
 echo "3D Reconstruction Pipeline Environment Activated"
+echo "CUDA_HOME: \$CUDA_HOME"
 echo "Python: \$(python --version)"
 echo "PyTorch: \$(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'Not available')"
 echo "CUDA: \$(python -c 'import torch; print(torch.version.cuda if torch.cuda.is_available() else "Not available")' 2>/dev/null)"
