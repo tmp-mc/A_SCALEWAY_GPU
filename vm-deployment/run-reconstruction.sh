@@ -1,8 +1,8 @@
 #!/bin/bash
-"""
-3D Reconstruction Pipeline - Main Script
-Simple workflow: Download → COLMAP → gsplat → Upload
-"""
+#
+# 3D Reconstruction Pipeline - Main Script
+# Simple workflow: Download → COLMAP → gsplat → Upload
+#
 
 set -e
 

@@ -647,7 +647,7 @@ build_colmap() {
     
     # Verify COLMAP installation
     if command -v colmap &> /dev/null; then
-        local colmap_version=$(colmap --version 2>&1 | head -1 || echo "Unknown")
+        local colmap_version=$(colmap help 2>&1 | head -1 || echo "Unknown")
         log_info "COLMAP installed: $colmap_version"
         
         if colmap --help 2>&1 | grep -q "CUDA enabled"; then
@@ -693,7 +693,7 @@ echo "🚀 3D Reconstruction Pipeline Environment Activated"
 echo "🐍 Python: $(python --version)"
 echo "🔥 PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'Not available')"
 echo "⚡ CUDA: $(python -c 'import torch; print("Available" if torch.cuda.is_available() else "Not available")' 2>/dev/null)"
-echo "📷 COLMAP: $(colmap --version 2>&1 | head -1 || echo 'Not available')"
+echo "📷 COLMAP: $(colmap help 2>&1 | head -1 || echo 'Not available')"
 echo "🎮 GPU: $(if command -v nvidia-smi &> /dev/null; then gpu_info=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_info" ]] && [[ ! "$gpu_info" =~ "Failed to initialize NVML" ]] && echo "$gpu_info" || echo "GPU query failed (driver/library version mismatch possible)"; else echo "nvidia-smi not available"; fi)"
 EOF
 
@@ -938,8 +938,8 @@ echo ""
 # COLMAP
 echo "📷 COLMAP:"
 if command -v colmap &> /dev/null; then
-    echo "   Version: $(colmap --version 2>&1 | head -1)"
-    echo "   CUDA: $(colmap --help 2>&1 | grep -q "CUDA enabled" && echo "✅ Enabled" || echo "❌ Disabled")"
+    echo "   Version: $(colmap help 2>&1 | head -1)"
+    echo "   CUDA: $(colmap --help 2>&1 | grep -q "with CUDA\|CUDA enabled" || colmap feature_extractor --help 2>&1 | grep -q "FeatureExtraction.use_gpu" && echo "✅ Enabled" || echo "❌ Disabled")"
 else
     echo "   ❌ Not installed"
 fi
@@ -1021,7 +1021,7 @@ run_verification() {
     
     # Test COLMAP CUDA
     echo -n "   COLMAP CUDA: "
-    if colmap --help 2>&1 | grep -q "CUDA enabled"; then
+    if colmap --help 2>&1 | grep -q "with CUDA" || colmap --help 2>&1 | grep -q "CUDA enabled" || colmap feature_extractor --help 2>&1 | grep -q "FeatureExtraction.use_gpu"; then
         echo "✅ Working"
     else
         echo "❌ Failed"
@@ -1059,7 +1059,7 @@ display_completion_summary() {
     echo "   ⚡ CUDA: $cuda_version"
     echo "   🐍 Python: $(python3 --version | grep -o "[0-9.]*")"
     echo "   🔥 PyTorch: $(source "$PYTHON_ENV/bin/activate" && python3 -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'Not available')"
-    echo "   📷 COLMAP: $(colmap --version 2>&1 | head -1 | cut -d' ' -f2 || echo 'Not available')"
+    echo "   📷 COLMAP: $(colmap help 2>&1 | head -1 | cut -d' ' -f2 || echo 'Not available')"
     echo "   📁 Project: $PROJECT_DIR"
     
     echo ""
