@@ -110,7 +110,7 @@ download_images() {
     
     # Auto-detect CDN usage
     if [[ "$use_cdn" == "auto" ]]; then
-        if [[ -n "$BUNNY_API_KEY" && "$BUNNY_API_KEY" != "your-api-key-here" ]]; then
+        if [[ -n "$BUNNY_STORAGE_ZONE" && "$BUNNY_STORAGE_ZONE" != "your-storage-zone-name" ]]; then
             use_cdn="true"
         else
             use_cdn="false"
@@ -120,12 +120,17 @@ download_images() {
     if [[ "$use_cdn" == "true" ]]; then
         log_step "Downloading images from Bunny CDN..."
         log_cdn "Storage Zone: $BUNNY_STORAGE_ZONE"
-        log_cdn "Input Path: ${BUNNY_INPUT_PATH:-images}"
+        log_cdn "Input Path: ${BUNNY_INPUT_PATH:-inputs}"
+        
+        # Check if API key is available in environment
+        if [[ -z "$BUNNY_API_KEY" || "$BUNNY_API_KEY" == "your-api-key-here" ]]; then
+            log_info "Bunny CDN API key required for download"
+            log_info "Set BUNNY_API_KEY environment variable or script will prompt for it"
+        fi
         
         python3 "$SCRIPTS_DIR/bunny_cdn.py" download \
-            --api-key "$BUNNY_API_KEY" \
             --storage-zone "$BUNNY_STORAGE_ZONE" \
-            --remote-path "${BUNNY_INPUT_PATH:-images}" \
+            --remote-path "${BUNNY_INPUT_PATH:-inputs}" \
             --local-path "$DATA_DIR/images" \
             --max-workers "${MAX_DOWNLOAD_WORKERS:-4}" \
             --extensions .jpg .jpeg .png .tiff .bmp
@@ -394,20 +399,25 @@ upload_results() {
         return 0
     fi
     
-    if [[ -z "$BUNNY_API_KEY" || "$BUNNY_API_KEY" == "your-api-key-here" ]]; then
+    if [[ -z "$BUNNY_STORAGE_ZONE" || "$BUNNY_STORAGE_ZONE" == "your-storage-zone-name" ]]; then
         log_info "Bunny CDN not configured, skipping upload"
         return 0
     fi
     
     log_step "Uploading results to Bunny CDN..."
     
-    local remote_path="${BUNNY_OUTPUT_PATH:-results/$(basename "$results_dir")}"
+    local remote_path="${BUNNY_OUTPUT_PATH:-output/$(basename "$results_dir")}"
     
     log_cdn "Storage Zone: $BUNNY_STORAGE_ZONE"
     log_cdn "Remote Path: $remote_path"
     
+    # Check if API key is available in environment
+    if [[ -z "$BUNNY_API_KEY" || "$BUNNY_API_KEY" == "your-api-key-here" ]]; then
+        log_info "Bunny CDN API key required for upload"
+        log_info "Set BUNNY_API_KEY environment variable or script will prompt for it"
+    fi
+    
     python3 "$SCRIPTS_DIR/bunny_cdn.py" upload \
-        --api-key "$BUNNY_API_KEY" \
         --storage-zone "$BUNNY_STORAGE_ZONE" \
         --local-path "$results_dir" \
         --remote-path "$remote_path" \
