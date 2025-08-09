@@ -152,6 +152,30 @@ COLMAP_CAMERA_MODEL=RADIAL       # Camera model
 
 ### Common Issues
 
+**Missing Python packages (e.g., tqdm import error):**
+```bash
+# Check all dependencies
+python3 check-dependencies.py
+
+# Install missing packages
+pip install -r requirements.txt
+
+# Or run full deployment
+./deploy-vm.sh
+```
+
+**ANSI color code error in .env file:**
+```bash
+# Error: /root/3d-reconstruction/.env: line 8: $'34m[STEP]\E[0m': command not found
+# Fix: Recreate clean .env file
+./setup-env.sh
+
+# Or manually fix on VM:
+cd /root/3d-reconstruction
+rm -f .env
+cp .env.template .env
+```
+
 **CUDA not available:**
 ```bash
 # Check CUDA installation

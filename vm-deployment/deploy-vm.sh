@@ -479,47 +479,29 @@ install_python_packages() {
     
     source "$PYTHON_ENV/bin/activate"
     
-    # Scientific computing and computer vision
-    pip install \
-        numpy \
-        scipy \
-        scikit-learn \
-        scikit-image \
-        opencv-python \
-        opencv-contrib-python \
-        pillow \
-        imageio \
-        matplotlib \
-        plotly
+    # Install packages from requirements.txt
+    local requirements_file=""
+    if [[ -f "$(dirname "$0")/requirements.txt" ]]; then
+        requirements_file="$(dirname "$0")/requirements.txt"
+    elif [[ -f "$PROJECT_DIR/requirements.txt" ]]; then
+        requirements_file="$PROJECT_DIR/requirements.txt"
+    else
+        log_error "requirements.txt not found"
+        return 1
+    fi
     
-    # 3D processing
-    pip install \
-        trimesh \
-        open3d \
-        plyfile
+    log_info "Installing packages from requirements.txt..."
+    pip install -r "$requirements_file"
     
-    # Data handling
-    pip install \
-        pandas \
-        h5py \
-        pyyaml \
-        toml
-    
-    # Utilities
-    pip install \
-        tqdm \
-        click \
-        requests \
-        urllib3
-    
-    # Install gsplat
-    pip install ninja packaging
+    # Install gsplat separately (from git)
+    log_info "Installing gsplat from git repository..."
     pip install git+https://github.com/nerfstudio-project/gsplat.git
     
-    # Verify gsplat installation
+    # Verify critical installations
+    python3 -c "import tqdm; print('tqdm installed successfully')"
     python3 -c "import gsplat; print('gsplat installed successfully')"
     
-    log_info "Python packages installed"
+    log_info "Python packages installed from requirements.txt"
 }
 
 build_colmap() {
@@ -779,24 +761,29 @@ create_configuration() {
             ;;
     esac
     
-    cat > "$PROJECT_DIR/.env" << EOF
+    # Create .env file without any risk of color code contamination
+    # Use a temporary file first, then move it to ensure clean creation
+    local temp_env_file=$(mktemp)
+    
+    # Write configuration to temporary file (no shell expansion of color variables)
+    cat > "$temp_env_file" << 'ENVEOF'
 # 3D Reconstruction Pipeline Configuration
-# GPU Optimized Settings for $gpu_name
+# GPU Optimized Settings
 
 # GPU Configuration
 USE_GPU=true
 CUDA_DEVICE=0
-GPU_MEMORY_GB=$gpu_memory_gb
-GPU_ARCHITECTURE=$gpu_arch
+GPU_MEMORY_GB=PLACEHOLDER_GPU_MEMORY_GB
+GPU_ARCHITECTURE=PLACEHOLDER_GPU_ARCH
 
-# Processing Settings - Optimized for $gpu_name
-MAX_IMAGE_SIZE=$max_image_size
+# Processing Settings - Optimized GPU
+MAX_IMAGE_SIZE=PLACEHOLDER_MAX_IMAGE_SIZE
 COLMAP_QUALITY=high
 GAUSSIAN_ITERATIONS=30000
-BATCH_SIZE=$batch_size
+BATCH_SIZE=PLACEHOLDER_BATCH_SIZE
 
 # GPU Optimizations
-CUDA_MEMORY_FRACTION=$memory_fraction
+CUDA_MEMORY_FRACTION=PLACEHOLDER_MEMORY_FRACTION
 ENABLE_MIXED_PRECISION=true
 ENABLE_CUDNN_BENCHMARK=true
 
@@ -819,7 +806,7 @@ COMPRESSION_LEVEL=6
 
 # Performance Settings
 PARALLEL_WORKERS=16
-CACHE_SIZE_GB=$cache_size_gb
+CACHE_SIZE_GB=PLACEHOLDER_CACHE_SIZE_GB
 
 # Bunny CDN Settings (configure as needed)
 BUNNY_STORAGE_ZONE=your-storage-zone-name
@@ -829,15 +816,39 @@ BUNNY_OUTPUT_PATH=output
 MAX_DOWNLOAD_WORKERS=4
 MAX_UPLOAD_WORKERS=2
 ENABLE_AUTO_UPLOAD=true
-EOF
-
+ENVEOF
+    
+    # Replace placeholders with actual values using sed (no shell expansion)
+    sed -i "s/PLACEHOLDER_GPU_MEMORY_GB/$gpu_memory_gb/g" "$temp_env_file"
+    sed -i "s/PLACEHOLDER_GPU_ARCH/$gpu_arch/g" "$temp_env_file"
+    sed -i "s/PLACEHOLDER_MAX_IMAGE_SIZE/$max_image_size/g" "$temp_env_file"
+    sed -i "s/PLACEHOLDER_BATCH_SIZE/$batch_size/g" "$temp_env_file"
+    sed -i "s/PLACEHOLDER_MEMORY_FRACTION/$memory_fraction/g" "$temp_env_file"
+    sed -i "s/PLACEHOLDER_CACHE_SIZE_GB/$cache_size_gb/g" "$temp_env_file"
+    
+    # Move the clean file to final location
+    mv "$temp_env_file" "$PROJECT_DIR/.env"
+    
+    # Create template copy
     cp "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.template"
+    
+    # Verify the file is clean (no ANSI codes)
+    if grep -q $'\033\|\\033\|\\E\[\|\\x1b' "$PROJECT_DIR/.env"; then
+        log_error "ANSI color codes detected in .env file - this should not happen"
+        return 1
+    fi
     
     log_info "Configuration files created with $gpu_name optimizations"
 }
 
 copy_pipeline_scripts() {
     log_step "Setting up pipeline scripts..."
+    
+    # Copy requirements.txt
+    if [[ -f "$(dirname "$0")/requirements.txt" ]]; then
+        cp "$(dirname "$0")/requirements.txt" "$PROJECT_DIR/"
+        log_info "requirements.txt copied to project directory"
+    fi
     
     # Copy existing scripts if they exist
     if [[ -f "$(dirname "$0")/run-reconstruction.sh" ]]; then
