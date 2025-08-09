@@ -1,227 +1,243 @@
 # 3D Reconstruction Pipeline - VM Deployment
 
-This directory contains VM-compatible deployment scripts that work with existing CUDA installations and avoid driver conflicts.
+**Optimized for Ubuntu 24.04 Noble Wombat + NVIDIA L4 GPU (24GB)**
 
-## 🚀 Quick Start (VM)
+This streamlined deployment script sets up a complete 3D reconstruction pipeline on a VM with pre-installed NVIDIA drivers and CUDA toolkit.
 
-For VMs with pre-installed CUDA and NVIDIA drivers:
+## 🎯 Target Environment
 
+- **OS**: Ubuntu 24.04 LTS (Noble Wombat)
+- **GPU**: NVIDIA L4 (24GB VRAM)
+- **Architecture**: Ada Lovelace (CUDA Compute Capability 8.9)
+- **Prerequisites**: NVIDIA drivers and CUDA toolkit already installed
+
+## 🚀 Quick Start
+
+### 1. Prerequisites Check
+Ensure your VM has:
 ```bash
-# One-command deployment
+# Check NVIDIA drivers
+nvidia-smi
+
+# Check CUDA (any version is fine)
+nvcc --version
+# OR check if CUDA is installed anywhere
+find /usr -name "nvcc" 2>/dev/null
+```
+
+### 2. One-Command Deployment
+```bash
+cd vm-deployment
+chmod +x deploy-vm.sh
 ./deploy-vm.sh
 ```
 
-## 📋 VM Requirements
-
-- **Ubuntu** (any recent version, optimized for 24.04)
-- **Pre-installed NVIDIA drivers** (nvidia-smi working)
-- **Pre-installed CUDA toolkit** (any version 11.x or 12.x)
-- **20+ GB disk space**
-- **8+ GB RAM** (16+ GB recommended)
-- **Internet connection**
-- **Sudo privileges**
-
-## 🔧 VM-Specific Scripts
-
-### Core Scripts
-
-| Script | Purpose | VM-Specific Features |
-|--------|---------|---------------------|
-| `deploy-vm.sh` | One-command deployment | Uses existing CUDA, no conflicts |
-| `setup-system-vm.sh` | System dependencies | Detects existing CUDA installation |
-| `build-deps-vm.sh` | Build dependencies | Auto-detects CUDA version & GPU |
-
-### Key Differences from Standard Deployment
-
-| Feature | Standard Scripts | VM Scripts |
-|---------|-----------------|------------|
-| CUDA Installation | Installs CUDA 12.6 | Uses existing CUDA |
-| Driver Management | Installs nvidia-driver-580 | Uses existing drivers |
-| PyTorch Version | Fixed to cu126 | Auto-detects (cu117/cu118/cu121) |
-| GPU Architecture | Hardcoded for RTX 4090 | Auto-detects from GPU name |
-| Compatibility | Ubuntu 24.04 + RTX 4090 | Any Ubuntu + Any CUDA-capable GPU |
-
-## 🛠️ Manual Deployment Steps
-
-If you prefer step-by-step installation:
-
+### 3. Activate Environment
 ```bash
-# Step 1: System setup (uses existing CUDA)
-./setup-system-vm.sh
-
-# Step 2: Reload environment
-source ~/.bashrc
-
-# Step 3: Build dependencies (auto-detects CUDA)
-./build-deps-vm.sh
-
-# Step 4: Verify installation
 source ~/3d-reconstruction/activate.sh
-python3 -c "import torch, gsplat; print('Ready!')"
 ```
 
-## 🔍 CUDA Auto-Detection
-
-The VM scripts automatically detect:
-
-### CUDA Version Mapping
-- **CUDA 12.1+** → PyTorch cu121
-- **CUDA 12.0** → PyTorch cu118  
-- **CUDA 11.8+** → PyTorch cu118
-- **CUDA 11.7** → PyTorch cu117
-- **Unsupported** → CPU-only PyTorch
-
-### GPU Architecture Detection
-- **RTX 4090/4080/4070** → Compute 8.9
-- **RTX 3090/3080/3070** → Compute 8.6
-- **RTX 2080/2070** → Compute 7.5
-- **GTX 1080/1070** → Compute 6.1
-- **Tesla V100** → Compute 7.0
-- **Tesla T4** → Compute 7.5
-- **A100** → Compute 8.0
-- **Unknown GPU** → Compute 7.5 (safe default)
-
-## 📊 System Status
-
-Check your VM status after deployment:
-
+### 4. Check Status
 ```bash
-# Comprehensive system check
-~/3d-reconstruction/check-vm-status.sh
-
-# Quick environment test
-source ~/3d-reconstruction/activate.sh
-python3 -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"
+~/3d-reconstruction/check-status.sh
 ```
 
-## 🐛 Troubleshooting VM Issues
+## 📦 What Gets Installed
 
-### Common VM Problems
+### System Dependencies
+- Build tools (cmake, ninja, gcc)
+- Python 3.12 + development headers
+- COLMAP dependencies (Boost, Eigen, OpenCV, etc.)
 
-#### 1. CUDA Not Found
-```bash
-# Check if CUDA is installed
-nvcc --version
-# or
-ls /usr/local/cuda*/bin/nvcc
+### Python Environment
+- **PyTorch** with CUDA 12.x support (auto-detects CUDA version)
+- **gsplat** - GPU-accelerated Gaussian splatting
+- **Scientific stack** - NumPy, SciPy, OpenCV, etc.
+- **3D processing** - Open3D, Trimesh, PLY support
 
-# If not found, install CUDA on your VM first
-```
+### COLMAP
+- Built from source with L4 GPU optimization
+- CUDA Architecture 8.9 (Ada Lovelace)
+- Full GUI and OpenGL support
 
-#### 2. NVIDIA Drivers Missing
-```bash
-# Check drivers
-nvidia-smi
+## 🎮 L4 GPU Optimizations
 
-# If not working, install drivers on your VM
-sudo ubuntu-drivers autoinstall
-sudo reboot
-```
+The deployment automatically configures:
 
-#### 3. PyTorch CUDA Not Available
-```bash
-# Check CUDA compatibility
-python3 -c "import torch; print(torch.version.cuda)"
-python3 -c "import torch; print(torch.cuda.is_available())"
-
-# Reinstall with correct CUDA version
-pip uninstall torch torchvision torchaudio
-# VM script will auto-detect and reinstall correct version
-```
-
-#### 4. COLMAP Build Fails
-```bash
-# Check CUDA compiler
-which nvcc
-$CUDA_HOME/bin/nvcc --version
-
-# Rebuild COLMAP manually
-cd ~/build/colmap/build
-make clean
-cmake .. -DCUDA_ENABLED=ON -DCMAKE_CUDA_ARCHITECTURES="75"
-make -j$(nproc)
-```
-
-### VM-Specific Debugging
-
-```bash
-# Check VM CUDA setup
-echo "CUDA_HOME: $CUDA_HOME"
-echo "PATH: $PATH"
-echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
-
-# Test CUDA compilation
-echo 'int main(){return 0;}' > test.cu
-nvcc test.cu -o test
-./test && echo "CUDA compilation works"
-```
-
-## 🔄 Updating VM Installation
-
-To update your VM installation:
-
-```bash
-# Update system packages
-sudo apt update && sudo apt upgrade
-
-# Rebuild Python environment
-rm -rf ~/3d-reconstruction/venv
-./build-deps-vm.sh
-
-# Update COLMAP
-rm -rf ~/build/colmap
-./build-deps-vm.sh
-```
+- **CUDA Architecture**: 8.9 for Ada Lovelace
+- **Memory Settings**: Optimized for 24GB VRAM
+- **Batch Sizes**: Configured for high-resolution processing
+- **Mixed Precision**: Enabled for faster training
+- **Image Processing**: Up to 4K resolution support
 
 ## 📁 Project Structure
 
-After VM deployment:
-
+After deployment:
 ```
 ~/3d-reconstruction/
-├── activate.sh              # Environment activation (VM-compatible)
-├── check-vm-status.sh       # VM-specific status checker
+├── activate.sh              # Environment activation
+├── check-status.sh          # System status check
+├── venv/                    # Python virtual environment
 ├── data/
-│   └── images/              # Input images
+│   ├── images/             # Input images
+│   └── models/             # 3D models
 ├── output/
 │   ├── colmap/             # COLMAP results
-│   ├── gaussian/           # Gaussian splatting results
+│   ├── gaussian/           # Gaussian splatting
 │   └── results/            # Final outputs
-├── venv/                   # Python virtual environment
-├── .env                    # Configuration file
-└── scripts/                # Pipeline scripts
+├── cache/                   # Processing cache
+├── logs/                    # System logs
+├── scripts/                 # Pipeline scripts
+├── .env                     # Configuration
+└── run-reconstruction.sh    # Main pipeline
 ```
 
-## 🌐 Cloud VM Providers
+## 🔧 Configuration
 
-Tested on:
-- **Google Cloud Platform** (with GPU instances)
-- **AWS EC2** (with GPU instances)  
-- **Azure** (with GPU instances)
-- **Paperspace** (with GPU instances)
-- **RunPod** (with GPU instances)
+The deployment creates optimized settings in `~/3d-reconstruction/.env`:
 
-## 💡 Performance Tips for VMs
+```bash
+# L4 GPU Configuration (24GB VRAM)
+USE_GPU=true
+CUDA_DEVICE=0
+GPU_MEMORY_GB=24
 
-1. **Use GPU instances** - CPU-only will be very slow
-2. **Choose adequate memory** - 16GB+ recommended for large reconstructions
-3. **Use SSD storage** - Faster I/O for image processing
-4. **Monitor GPU memory** - Use `nvidia-smi` to check usage
-5. **Optimize batch sizes** - Adjust based on available GPU memory
+# Processing Settings
+MAX_IMAGE_SIZE=4096
+COLMAP_QUALITY=high
+GAUSSIAN_ITERATIONS=30000
+BATCH_SIZE=8
 
-## 🆘 Getting Help
+# L4 Optimizations
+CUDA_MEMORY_FRACTION=0.9
+ENABLE_MIXED_PRECISION=true
+ENABLE_CUDNN_BENCHMARK=true
+```
 
-If you encounter issues:
+## 🧪 Usage Examples
 
-1. **Check VM status**: `~/3d-reconstruction/check-vm-status.sh`
-2. **Verify CUDA**: `nvcc --version && nvidia-smi`
-3. **Test environment**: `source ~/3d-reconstruction/activate.sh`
-4. **Check logs**: Look for error messages in terminal output
-5. **Manual steps**: Try individual scripts if deployment fails
+### Basic Reconstruction
+```bash
+# Activate environment
+source ~/3d-reconstruction/activate.sh
 
-## 📝 Notes
+# Place your images
+cp /path/to/images/* ~/3d-reconstruction/data/images/
 
-- VM scripts are more flexible but may be slightly slower to deploy
-- Auto-detection adds robustness but may not always pick optimal settings
-- You can always override detected settings by modifying environment variables
-- The VM approach is recommended for cloud deployments and shared systems
+# Run reconstruction
+cd ~/3d-reconstruction
+./run-reconstruction.sh
+```
+
+### Check System Status
+```bash
+~/3d-reconstruction/check-status.sh
+```
+
+### Manual COLMAP
+```bash
+source ~/3d-reconstruction/activate.sh
+colmap automatic_reconstructor \
+    --image_path ~/3d-reconstruction/data/images \
+    --workspace_path ~/3d-reconstruction/output/colmap
+```
+
+### Python API
+```python
+# Activate environment first: source ~/3d-reconstruction/activate.sh
+import torch
+import gsplat
+
+# Check GPU
+print(f"CUDA available: {torch.cuda.is_available()}")
+print(f"GPU: {torch.cuda.get_device_name(0)}")
+print(f"Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
+
+# Use gsplat for Gaussian splatting
+# Your reconstruction code here...
+```
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+**NVIDIA drivers not found**
+```bash
+# Check if drivers are installed
+nvidia-smi
+# If not working, install drivers first
+```
+
+**CUDA not detected**
+```bash
+# Find CUDA installation
+find /usr -name "nvcc" 2>/dev/null
+find /opt -name "nvcc" 2>/dev/null
+
+# Check environment
+echo $CUDA_HOME
+echo $PATH | grep cuda
+```
+
+**PyTorch CUDA not working**
+```bash
+source ~/3d-reconstruction/activate.sh
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
+**COLMAP CUDA disabled**
+```bash
+colmap --help | grep CUDA
+# Should show "CUDA enabled"
+```
+
+### Verification Commands
+
+```bash
+# Full system check
+~/3d-reconstruction/check-status.sh
+
+# Verify only
+./deploy-vm.sh --verify-only
+
+# Show help
+./deploy-vm.sh --help
+```
+
+## 📊 Performance Expectations
+
+With L4 GPU (24GB VRAM):
+
+- **Image Processing**: Up to 4K resolution
+- **COLMAP**: ~100-500 images in 5-15 minutes
+- **Gaussian Splatting**: 30K iterations in 10-30 minutes
+- **Memory Usage**: Up to 22GB VRAM utilization
+- **Batch Processing**: 8-16 images simultaneously
+
+## 🔄 Updates
+
+To update the pipeline:
+```bash
+cd vm-deployment
+git pull
+./deploy-vm.sh  # Re-run deployment
+```
+
+## 📞 Support
+
+- **Status Check**: `~/3d-reconstruction/check-status.sh`
+- **Logs**: `~/3d-reconstruction/logs/`
+- **Configuration**: `~/3d-reconstruction/.env`
+
+## 🏷️ Version Info
+
+- **Target OS**: Ubuntu 24.04 Noble Wombat
+- **GPU**: NVIDIA L4 (24GB)
+- **CUDA**: Auto-detected (12.x recommended)
+- **Python**: 3.12
+- **PyTorch**: Latest with CUDA support
+- **COLMAP**: Latest from source
+
+---
+
+**Ready for high-performance 3D reconstruction with L4 GPU power! 🚀**
