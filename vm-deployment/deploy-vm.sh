@@ -1391,7 +1391,7 @@ main() {
     create_activation_script
     create_configuration
     setup_secure_credentials
-    copy_pipeline_scripts
+    # copy_pipeline_scripts  # Skipped - scripts will be placed manually
     create_status_script
     
     if run_verification; then
