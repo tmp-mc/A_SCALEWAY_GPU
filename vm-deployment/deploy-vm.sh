@@ -808,11 +808,16 @@ COMPRESSION_LEVEL=6
 PARALLEL_WORKERS=16
 CACHE_SIZE_GB=PLACEHOLDER_CACHE_SIZE_GB
 
-# Bunny CDN Settings (configure as needed)
-BUNNY_STORAGE_ZONE=your-storage-zone-name
-BUNNY_API_KEY=your-api-key-here
-BUNNY_INPUT_PATH=inputs
-BUNNY_OUTPUT_PATH=output
+# Hetzner S3 Settings (configure as needed)
+# ⚠️  SECURITY: Set your actual credentials using environment variables or manual editing
+# DO NOT commit real credentials to version control
+HETZNER_S3_ENDPOINT=https://nbg1.your-objectstorage.com
+HETZNER_ACCESS_KEY=your-access-key-here
+HETZNER_SECRET_KEY=your-secret-key-here
+HETZNER_API_TOKEN=your-api-token-here
+HETZNER_BUCKET_NAME=your-bucket-name
+HETZNER_INPUT_PATH=inputs
+HETZNER_OUTPUT_PATH=output
 MAX_DOWNLOAD_WORKERS=4
 MAX_UPLOAD_WORKERS=2
 ENABLE_AUTO_UPLOAD=true
@@ -829,8 +834,12 @@ ENVEOF
     # Move the clean file to final location
     mv "$temp_env_file" "$PROJECT_DIR/.env"
     
-    # Create template copy
+    # Set secure permissions on the environment file
+    chmod 600 "$PROJECT_DIR/.env"
+    
+    # Create template copy with secure permissions
     cp "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.template"
+    chmod 644 "$PROJECT_DIR/.env.template"  # Template can be readable
     
     # Verify the file is clean (no ANSI codes)
     if grep -q $'\033\|\\033\|\\E\[\|\\x1b' "$PROJECT_DIR/.env"; then
@@ -839,6 +848,184 @@ ENVEOF
     fi
     
     log_info "Configuration files created with $gpu_name optimizations"
+    log_warn "⚠️  SECURITY NOTICE: Configure Hetzner S3 credentials securely"
+    log_warn "   Edit ~/.env or set environment variables before using S3 features"
+    log_warn "   Never commit real credentials to version control"
+}
+
+setup_secure_credentials() {
+    log_step "Setting up secure credential configuration..."
+    
+    # Create credentials setup script
+    cat > "$PROJECT_DIR/setup-credentials.sh" << 'EOF'
+#!/bin/bash
+#
+# Secure Hetzner S3 Credentials Setup
+# This script helps you configure S3 credentials securely
+#
+
+set -e
+
+PROJECT_HOME="$HOME/3d-reconstruction"
+ENV_FILE="$PROJECT_HOME/.env"
+
+echo "🔐 Hetzner S3 Credentials Setup"
+echo "================================"
+echo ""
+echo "⚠️  SECURITY WARNING: Never commit real credentials to version control!"
+echo "   This script will help you configure credentials securely."
+echo ""
+
+if [[ ! -f "$ENV_FILE" ]]; then
+    echo "❌ Configuration file not found: $ENV_FILE"
+    echo "   Run the deployment script first"
+    exit 1
+fi
+
+# Check if credentials are already configured
+if grep -q "your-access-key-here" "$ENV_FILE"; then
+    echo "📝 Current status: Credentials are using placeholder values (not configured)"
+else
+    echo "📝 Current status: Credentials appear to be configured"
+    echo ""
+    read -p "Do you want to update existing credentials? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "✅ Keeping existing configuration"
+        exit 0
+    fi
+fi
+
+echo ""
+echo "🔑 Choose credential configuration method:"
+echo "  1) Environment variables (recommended for servers)"
+echo "  2) Interactive setup (recommended for development)"
+echo "  3) Manual editing"
+echo ""
+
+read -p "Select method (1-3): " -n 1 -r method
+echo
+
+case "$method" in
+    1)
+        echo ""
+        echo "🌍 Environment Variables Setup"
+        echo "==============================="
+        echo ""
+        echo "Add these lines to your ~/.bashrc or ~/.profile:"
+        echo ""
+        echo "export HETZNER_ACCESS_KEY=\"your-actual-access-key\""
+        echo "export HETZNER_SECRET_KEY=\"your-actual-secret-key\""  
+        echo "export HETZNER_API_TOKEN=\"your-actual-api-token\""
+        echo "export HETZNER_BUCKET_NAME=\"your-bucket-name\""
+        echo ""
+        echo "Then run: source ~/.bashrc"
+        echo ""
+        echo "✅ The pipeline will automatically use environment variables"
+        ;;
+    2)
+        echo ""
+        echo "🔐 Interactive Credential Setup"
+        echo "==============================="
+        echo ""
+        
+        # Backup original file
+        cp "$ENV_FILE" "$ENV_FILE.backup"
+        echo "📄 Backed up original config to: $ENV_FILE.backup"
+        
+        # Get credentials interactively
+        echo "Please enter your Hetzner S3 credentials:"
+        echo ""
+        
+        read -p "Access Key: " access_key
+        if [[ -z "$access_key" ]]; then
+            echo "❌ Access key cannot be empty"
+            exit 1
+        fi
+        
+        read -s -p "Secret Key: " secret_key
+        echo
+        if [[ -z "$secret_key" ]]; then
+            echo "❌ Secret key cannot be empty"  
+            exit 1
+        fi
+        
+        read -p "API Token (optional): " api_token
+        read -p "Bucket Name: " bucket_name
+        
+        if [[ -z "$bucket_name" ]]; then
+            echo "❌ Bucket name cannot be empty"
+            exit 1
+        fi
+        
+        # Update configuration file securely
+        sed -i.bak \
+            -e "s|HETZNER_ACCESS_KEY=.*|HETZNER_ACCESS_KEY=$access_key|" \
+            -e "s|HETZNER_SECRET_KEY=.*|HETZNER_SECRET_KEY=$secret_key|" \
+            -e "s|HETZNER_API_TOKEN=.*|HETZNER_API_TOKEN=${api_token:-your-api-token-here}|" \
+            -e "s|HETZNER_BUCKET_NAME=.*|HETZNER_BUCKET_NAME=$bucket_name|" \
+            "$ENV_FILE"
+        
+        echo ""
+        echo "✅ Credentials configured successfully!"
+        echo "📁 Configuration updated: $ENV_FILE"
+        
+        # Set restrictive permissions
+        chmod 600 "$ENV_FILE"
+        echo "🔒 Set secure file permissions (600)"
+        
+        # Test connection
+        echo ""
+        read -p "Test S3 connection now? (Y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            echo "🔍 Testing connection..."
+            source "$PROJECT_HOME/activate.sh" 2>/dev/null || true
+            python3 "$PROJECT_HOME/scripts/hetzner_s3.py" test --bucket-name "$bucket_name" || {
+                echo "⚠️  Connection test failed - please verify credentials"
+                echo "   You can test manually with: python3 scripts/hetzner_s3.py test"
+            }
+        fi
+        ;;
+    3)
+        echo ""
+        echo "📝 Manual Configuration"
+        echo "======================"
+        echo ""
+        echo "Edit the configuration file manually:"
+        echo "  File: $ENV_FILE"
+        echo ""
+        echo "Update these lines with your actual values:"
+        echo "  HETZNER_ACCESS_KEY=your-actual-access-key"
+        echo "  HETZNER_SECRET_KEY=your-actual-secret-key"
+        echo "  HETZNER_API_TOKEN=your-actual-api-token"  
+        echo "  HETZNER_BUCKET_NAME=your-actual-bucket-name"
+        echo ""
+        echo "Remember to:"
+        echo "  • Set secure permissions: chmod 600 $ENV_FILE"
+        echo "  • Never commit the file with real credentials"
+        echo "  • Test with: python3 scripts/hetzner_s3.py test"
+        ;;
+    *)
+        echo "❌ Invalid selection"
+        exit 1
+        ;;
+esac
+
+echo ""
+echo "🛡️  Security Reminders:"
+echo "  • Never share your credentials"
+echo "  • Use environment variables in production"
+echo "  • Regularly rotate your access keys"
+echo "  • Monitor S3 usage for unexpected activity"
+echo ""
+echo "✅ Credential setup complete!"
+EOF
+
+    chmod +x "$PROJECT_DIR/setup-credentials.sh"
+    
+    log_info "Secure credential setup script created: $PROJECT_DIR/setup-credentials.sh"
+    log_info "Users can run: ~/3d-reconstruction/setup-credentials.sh"
 }
 
 copy_pipeline_scripts() {
@@ -863,7 +1050,7 @@ copy_pipeline_scripts() {
     # Copy Python scripts (essential for pipeline)
     local scripts_copied=0
     if [[ -d "$deployment_dir/scripts" ]]; then
-        local python_scripts=("bunny_cdn.py" "gsplat_trainer.py" "export_pipeline.py" "web_presets.py")
+        local python_scripts=("hetzner_s3.py" "gsplat_trainer.py" "export_pipeline.py" "web_presets.py")
         
         for script in "${python_scripts[@]}"; do
             if [[ -f "$deployment_dir/scripts/$script" ]]; then
@@ -889,7 +1076,7 @@ copy_pipeline_scripts() {
     fi
     
     # Verify critical scripts are in place
-    local critical_scripts=("bunny_cdn.py" "gsplat_trainer.py")
+    local critical_scripts=("hetzner_s3.py" "gsplat_trainer.py")
     for script in "${critical_scripts[@]}"; do
         if [[ ! -f "$PROJECT_DIR/scripts/$script" ]]; then
             log_error "Critical script missing: $script"
@@ -1115,13 +1302,16 @@ display_completion_summary() {
     echo "   1. Activate environment:"
     echo "      ${CYAN}source ~/3d-reconstruction/activate.sh${NC}"
     echo ""
-    echo "   2. Check system status:"
+    echo "   2. Configure Hetzner S3 credentials (if using S3):"
+    echo "      ${CYAN}~/3d-reconstruction/setup-credentials.sh${NC}"
+    echo ""
+    echo "   3. Check system status:"
     echo "      ${CYAN}~/3d-reconstruction/check-status.sh${NC}"
     echo ""
-    echo "   3. Place your images:"
+    echo "   4. Place your images:"
     echo "      ${CYAN}cp /path/to/images/* ~/3d-reconstruction/data/images/${NC}"
     echo ""
-    echo "   4. Run reconstruction:"
+    echo "   5. Run reconstruction:"
     echo "      ${CYAN}cd ~/3d-reconstruction && ./run-reconstruction.sh${NC}"
     echo ""
     
@@ -1200,6 +1390,7 @@ main() {
     build_colmap
     create_activation_script
     create_configuration
+    setup_secure_credentials
     copy_pipeline_scripts
     create_status_script
     

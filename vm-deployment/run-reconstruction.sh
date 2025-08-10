@@ -18,7 +18,7 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
-log_cdn() { echo -e "${CYAN}[CDN]${NC} $1"; }
+log_s3() { echo -e "${CYAN}[S3]${NC} $1"; }
 
 # Configuration
 PROJECT_HOME="$HOME/3d-reconstruction"
@@ -31,7 +31,7 @@ ENV_FILE="$PROJECT_HOME/.env"
 print_banner() {
     echo -e "${CYAN}================================================${NC}"
     echo -e "${CYAN}  3D Reconstruction Pipeline                    ${NC}"
-    echo -e "${CYAN}  COLMAP + gsplat + Bunny CDN                   ${NC}"
+    echo -e "${CYAN}  COLMAP + gsplat + Hetzner S3                  ${NC}"
     echo -e "${CYAN}================================================${NC}"
 }
 
@@ -106,37 +106,37 @@ prepare_workspace() {
 }
 
 download_images() {
-    local use_cdn="${1:-auto}"
+    local use_s3="${1:-auto}"
     
-    # Auto-detect CDN usage
-    if [[ "$use_cdn" == "auto" ]]; then
-        if [[ -n "$BUNNY_STORAGE_ZONE" && "$BUNNY_STORAGE_ZONE" != "your-storage-zone-name" ]]; then
-            use_cdn="true"
+    # Auto-detect S3 usage
+    if [[ "$use_s3" == "auto" ]]; then
+        if [[ -n "$HETZNER_BUCKET_NAME" && "$HETZNER_BUCKET_NAME" != "your-bucket-name" ]]; then
+            use_s3="true"
         else
-            use_cdn="false"
+            use_s3="false"
         fi
     fi
     
-    if [[ "$use_cdn" == "true" ]]; then
-        log_step "Downloading images from Bunny CDN..."
-        log_cdn "Storage Zone: $BUNNY_STORAGE_ZONE"
-        log_cdn "Input Path: ${BUNNY_INPUT_PATH:-inputs}"
+    if [[ "$use_s3" == "true" ]]; then
+        log_step "Downloading images from Hetzner S3..."
+        log_s3 "Bucket: $HETZNER_BUCKET_NAME"
+        log_s3 "Input Path: ${HETZNER_INPUT_PATH:-inputs}"
         
-        # Check if API key is available in environment
-        if [[ -z "$BUNNY_API_KEY" || "$BUNNY_API_KEY" == "your-api-key-here" ]]; then
-            log_info "Bunny CDN API key required for download"
-            log_info "Set BUNNY_API_KEY environment variable or script will prompt for it"
+        # Check if credentials are available in environment
+        if [[ -z "$HETZNER_ACCESS_KEY" || "$HETZNER_ACCESS_KEY" == "your-access-key-here" ]]; then
+            log_info "Hetzner S3 credentials required for download"
+            log_info "Set HETZNER_ACCESS_KEY and HETZNER_SECRET_KEY environment variables or script will prompt for them"
         fi
         
-        python3 "$SCRIPTS_DIR/bunny_cdn.py" download \
-            --storage-zone "$BUNNY_STORAGE_ZONE" \
-            --remote-path "${BUNNY_INPUT_PATH:-inputs}" \
+        python3 "$SCRIPTS_DIR/hetzner_s3.py" download \
+            --bucket-name "$HETZNER_BUCKET_NAME" \
+            --remote-path "${HETZNER_INPUT_PATH:-inputs}" \
             --local-path "$DATA_DIR/images" \
             --max-workers "${MAX_DOWNLOAD_WORKERS:-4}" \
             --extensions .jpg .jpeg .png .tiff .bmp
         
         if [[ $? -ne 0 ]]; then
-            log_error "Failed to download images from CDN"
+            log_error "Failed to download images from S3"
             exit 1
         fi
     else
@@ -149,7 +149,7 @@ download_images() {
     
     if [[ "$image_count" -lt 3 ]]; then
         log_error "Insufficient images for reconstruction (found: $image_count, minimum: 3)"
-        if [[ "$use_cdn" == "false" ]]; then
+        if [[ "$use_s3" == "false" ]]; then
             log_error "Place images in: $DATA_DIR/images/"
         fi
         exit 1
@@ -399,33 +399,33 @@ upload_results() {
         return 0
     fi
     
-    if [[ -z "$BUNNY_STORAGE_ZONE" || "$BUNNY_STORAGE_ZONE" == "your-storage-zone-name" ]]; then
-        log_info "Bunny CDN not configured, skipping upload"
+    if [[ -z "$HETZNER_BUCKET_NAME" || "$HETZNER_BUCKET_NAME" == "your-bucket-name" ]]; then
+        log_info "Hetzner S3 not configured, skipping upload"
         return 0
     fi
     
-    log_step "Uploading results to Bunny CDN..."
+    log_step "Uploading results to Hetzner S3..."
     
-    local remote_path="${BUNNY_OUTPUT_PATH:-output/$(basename "$results_dir")}"
+    local remote_path="${HETZNER_OUTPUT_PATH:-output}/$(basename "$results_dir")"
     
-    log_cdn "Storage Zone: $BUNNY_STORAGE_ZONE"
-    log_cdn "Remote Path: $remote_path"
+    log_s3 "Bucket: $HETZNER_BUCKET_NAME"
+    log_s3 "Remote Path: $remote_path"
     
-    # Check if API key is available in environment
-    if [[ -z "$BUNNY_API_KEY" || "$BUNNY_API_KEY" == "your-api-key-here" ]]; then
-        log_info "Bunny CDN API key required for upload"
-        log_info "Set BUNNY_API_KEY environment variable or script will prompt for it"
+    # Check if credentials are available in environment
+    if [[ -z "$HETZNER_ACCESS_KEY" || "$HETZNER_ACCESS_KEY" == "your-access-key-here" ]]; then
+        log_info "Hetzner S3 credentials required for upload"
+        log_info "Set HETZNER_ACCESS_KEY and HETZNER_SECRET_KEY environment variables or script will prompt for them"
     fi
     
-    python3 "$SCRIPTS_DIR/bunny_cdn.py" upload \
-        --storage-zone "$BUNNY_STORAGE_ZONE" \
+    python3 "$SCRIPTS_DIR/hetzner_s3.py" upload \
+        --bucket-name "$HETZNER_BUCKET_NAME" \
         --local-path "$results_dir" \
         --remote-path "$remote_path" \
         --max-workers "${MAX_UPLOAD_WORKERS:-2}"
     
     if [[ $? -eq 0 ]]; then
-        log_cdn "Results uploaded successfully ✓"
-        log_cdn "URL: https://$BUNNY_STORAGE_ZONE.b-cdn.net/$remote_path/"
+        log_s3 "Results uploaded successfully ✓"
+        log_s3 "URL: https://${HETZNER_BUCKET_NAME}.${HETZNER_S3_ENDPOINT#https://}/$remote_path/"
         return 0
     else
         log_warn "Upload failed, but reconstruction completed successfully"
@@ -472,7 +472,7 @@ display_summary() {
     fi
     
     if [[ "$upload_success" == "0" ]]; then
-        echo "  ☁️  CDN: https://$BUNNY_STORAGE_ZONE.b-cdn.net/${BUNNY_OUTPUT_PATH:-results/$(basename "$results_dir")}/"
+        echo "  ☁️  S3: https://${HETZNER_BUCKET_NAME}.${HETZNER_S3_ENDPOINT#https://}/${HETZNER_OUTPUT_PATH:-output}/$(basename "$results_dir")/"
     fi
     
     echo ""

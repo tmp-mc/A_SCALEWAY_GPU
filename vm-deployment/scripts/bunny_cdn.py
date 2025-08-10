@@ -211,7 +211,7 @@ class BunnyCDNClient:
                 pass
     
     def download_directory(self, remote_path: str, local_path: Path, 
-                          extensions: List[str] = None, max_workers: int = 4) -> Tuple[int, int]:
+                          extensions: List[str] = None, max_workers: int = 4) -> Tuple[int, int, int]:
         """Download all files from remote directory"""
         print(f"📥 Downloading from {remote_path} to {local_path}")
         
@@ -219,7 +219,7 @@ class BunnyCDNClient:
         files = self.list_files(remote_path, extensions)
         if not files:
             print(f"⚠️  No files found in {remote_path}")
-            return 0, 0
+            return 0, 0, 0
         
         print(f"📋 Found {len(files)} files to download")
         
@@ -229,6 +229,9 @@ class BunnyCDNClient:
         # Download files in parallel
         successful = 0
         failed = 0
+        corrupted = 0
+        failed_files = []
+        corrupted_files = []
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Create progress bar
@@ -241,28 +244,48 @@ class BunnyCDNClient:
                     local_file_path = local_path / filename
                     
                     future = executor.submit(self.download_file, remote_file_path, local_file_path)
-                    future_to_file[future] = filename
+                    future_to_file[future] = (filename, local_file_path)
                 
                 # Process completed downloads
                 for future in as_completed(future_to_file):
-                    filename = future_to_file[future]
+                    filename, local_file_path = future_to_file[future]
                     try:
                         success = future.result()
                         if success:
-                            successful += 1
-                            pbar.set_postfix({"✅": successful, "❌": failed})
+                            # Check if file is valid (not zero bytes)
+                            if local_file_path.exists() and local_file_path.stat().st_size > 0:
+                                successful += 1
+                            else:
+                                corrupted += 1
+                                corrupted_files.append(filename)
+                                print(f"⚠️  Downloaded file is corrupted/empty: {filename}")
                         else:
                             failed += 1
-                            pbar.set_postfix({"✅": successful, "❌": failed})
+                            failed_files.append(filename)
+                        
+                        pbar.set_postfix({"✅": successful, "❌": failed, "⚠️": corrupted})
                     except Exception as e:
                         failed += 1
+                        failed_files.append(filename)
                         print(f"❌ Failed to download {filename}: {e}")
-                        pbar.set_postfix({"✅": successful, "❌": failed})
+                        pbar.set_postfix({"✅": successful, "❌": failed, "⚠️": corrupted})
                     
                     pbar.update(1)
         
-        print(f"📥 Download complete: {successful} successful, {failed} failed")
-        return successful, failed
+        # Calculate success rate
+        total_attempted = successful + failed + corrupted
+        success_rate = (successful / total_attempted * 100) if total_attempted > 0 else 0
+        
+        print(f"📥 Download complete: {successful} successful, {failed} failed, {corrupted} corrupted")
+        print(f"📊 Success rate: {success_rate:.1f}% ({successful}/{total_attempted})")
+        
+        # Show details of failed/corrupted files
+        if failed_files:
+            print(f"❌ Failed downloads: {', '.join(failed_files[:5])}" + ("..." if len(failed_files) > 5 else ""))
+        if corrupted_files:
+            print(f"⚠️  Corrupted files: {', '.join(corrupted_files[:5])}" + ("..." if len(corrupted_files) > 5 else ""))
+        
+        return successful, failed, corrupted
     
     def upload_directory(self, local_path: Path, remote_path: str, max_workers: int = 2) -> Tuple[int, int]:
         """Upload all files from local directory"""
@@ -376,7 +399,7 @@ def download_command(args):
     extensions = args.extensions if args.extensions else ['.jpg', '.jpeg', '.png', '.tiff', '.bmp']
     local_path = Path(args.local_path)
     
-    successful, failed = client.download_directory(
+    successful, failed, corrupted = client.download_directory(
         args.remote_path, 
         local_path, 
         extensions, 
@@ -385,12 +408,34 @@ def download_command(args):
     
     client.cleanup()
     
-    if failed > 0:
-        print(f"⚠️  {failed} files failed to download")
+    # Calculate overall success rate
+    total_attempted = successful + failed + corrupted
+    if total_attempted == 0:
+        print("❌ No files were found to download")
         return 1
     
-    print(f"✅ Successfully downloaded {successful} files to {local_path}")
-    return 0
+    success_rate = (successful / total_attempted * 100)
+    
+    # Determine overall result based on success rate and valid files downloaded
+    if successful == 0:
+        print("❌ No files downloaded successfully")
+        return 1
+    elif success_rate >= 90.0:
+        # High success rate - consider this successful
+        print(f"✅ Download successful: {successful} files downloaded to {local_path}")
+        if failed > 0 or corrupted > 0:
+            print(f"   Note: {failed} failed, {corrupted} corrupted files (acceptable for {success_rate:.1f}% success rate)")
+        return 0
+    elif success_rate >= 70.0:
+        # Moderate success rate - warning but proceed
+        print(f"⚠️  Download completed with issues: {successful} files downloaded to {local_path}")
+        print(f"   Success rate: {success_rate:.1f}% - some files may need re-downloading")
+        return 0
+    else:
+        # Low success rate - consider this a failure
+        print(f"❌ Download failed: only {success_rate:.1f}% success rate")
+        print(f"   {successful} successful, {failed} failed, {corrupted} corrupted")
+        return 1
 
 
 def upload_command(args):

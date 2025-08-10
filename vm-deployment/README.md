@@ -1,6 +1,6 @@
 # 3D Reconstruction Pipeline - VM Deployment
 
-Simple, script-based deployment of a complete 3D reconstruction pipeline on Ubuntu 24.04 VMs. No Docker required - just clean, executable shell scripts.
+Simple, script-based deployment of a complete 3D reconstruction pipeline on Ubuntu 24.04 VMs with Hetzner S3 storage integration. No Docker required - just clean, executable shell scripts.
 
 ## 🚀 Quick Start
 
@@ -18,7 +18,7 @@ That's it! The script will:
 - Install CUDA 12.6 and GPU drivers
 - Build COLMAP with CUDA support
 - Set up Python environment with PyTorch and gsplat
-- Configure Bunny CDN integration
+- Configure Hetzner S3 integration
 - Create complete project structure
 
 ## 📋 Requirements
@@ -61,7 +61,7 @@ After deployment, you'll have a complete project in `~/3d-reconstruction/`:
 ├── check-status.sh           # System status checker
 ├── quick-start.sh            # Quick start guide
 ├── scripts/
-│   ├── bunny_cdn.py          # CDN integration
+│   ├── hetzner_s3.py         # S3 storage integration
 │   └── gsplat_trainer.py     # Gaussian splatting trainer
 ├── data/
 │   └── images/               # Input images directory
@@ -81,7 +81,7 @@ After deployment, you'll have a complete project in `~/3d-reconstruction/`:
 # Activate the environment
 source ~/3d-reconstruction/activate.sh
 
-# Place images in data/images/ or configure Bunny CDN
+# Place images in data/images/ or configure Hetzner S3
 cp /path/to/your/images/* ~/3d-reconstruction/data/images/
 
 # Run reconstruction
@@ -108,18 +108,20 @@ cd ~/3d-reconstruction
 ./run-reconstruction.sh --clean
 ```
 
-## ☁️ Bunny CDN Configuration
+## ☁️ Hetzner S3 Configuration
 
 Edit `~/3d-reconstruction/.env` to configure cloud storage:
 
 ```bash
-# Required for CDN usage
-BUNNY_API_KEY=your-api-key-here
-BUNNY_STORAGE_ZONE=your-storage-zone-name
+# Required for S3 usage
+HETZNER_ACCESS_KEY=your-access-key-here
+HETZNER_SECRET_KEY=your-secret-key-here
+HETZNER_BUCKET_NAME=your-bucket-name
 
 # Optional settings
-BUNNY_INPUT_PATH=images
-BUNNY_OUTPUT_PATH=results
+HETZNER_S3_ENDPOINT=https://nbg1.your-objectstorage.com
+HETZNER_INPUT_PATH=inputs
+HETZNER_OUTPUT_PATH=output
 ENABLE_AUTO_UPLOAD=true
 ```
 
@@ -284,7 +286,7 @@ rm -rf ~/build/colmap
 - `run-reconstruction.sh` - Main reconstruction pipeline
 
 ### Helper Scripts
-- `scripts/bunny_cdn.py` - CDN upload/download utility
+- `scripts/hetzner_s3.py` - S3 upload/download utility
 - `scripts/gsplat_trainer.py` - Gaussian splatting training
 - `activate.sh` - Environment activation
 - `check-status.sh` - System status checker
@@ -329,7 +331,7 @@ cd vm-deployment
 
 # 3. Configure for your use case
 source ~/3d-reconstruction/activate.sh
-nano ~/3d-reconstruction/.env  # Add your Bunny CDN keys
+nano ~/3d-reconstruction/.env  # Add your Hetzner S3 credentials
 
 # 4. Run reconstruction
 cp /path/to/images/* ~/3d-reconstruction/data/images/
