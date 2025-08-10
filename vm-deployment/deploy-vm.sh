@@ -844,24 +844,61 @@ ENVEOF
 copy_pipeline_scripts() {
     log_step "Setting up pipeline scripts..."
     
-    # Copy requirements.txt
-    if [[ -f "$(dirname "$0")/requirements.txt" ]]; then
-        cp "$(dirname "$0")/requirements.txt" "$PROJECT_DIR/"
-        log_info "requirements.txt copied to project directory"
-    fi
+    # Get the absolute path of the deployment directory
+    local deployment_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    log_info "Deployment directory: $deployment_dir"
     
-    # Copy existing scripts if they exist
-    if [[ -f "$(dirname "$0")/run-reconstruction.sh" ]]; then
-        cp "$(dirname "$0")/run-reconstruction.sh" "$PROJECT_DIR/"
+    # Ensure scripts directory exists in project
+    mkdir -p "$PROJECT_DIR/scripts"
+    
+    # Copy main reconstruction script
+    if [[ -f "$deployment_dir/run-reconstruction.sh" ]]; then
+        cp "$deployment_dir/run-reconstruction.sh" "$PROJECT_DIR/"
         chmod +x "$PROJECT_DIR/run-reconstruction.sh"
+        log_info "run-reconstruction.sh copied and made executable"
+    else
+        log_warn "run-reconstruction.sh not found in deployment directory"
     fi
     
-    if [[ -d "$(dirname "$0")/scripts" ]]; then
-        cp -r "$(dirname "$0")/scripts" "$PROJECT_DIR/"
-        find "$PROJECT_DIR/scripts" -name "*.py" -exec chmod +x {} \; 2>/dev/null || true
+    # Copy Python scripts (essential for pipeline)
+    local scripts_copied=0
+    if [[ -d "$deployment_dir/scripts" ]]; then
+        local python_scripts=("bunny_cdn.py" "gsplat_trainer.py" "export_pipeline.py" "web_presets.py")
+        
+        for script in "${python_scripts[@]}"; do
+            if [[ -f "$deployment_dir/scripts/$script" ]]; then
+                cp "$deployment_dir/scripts/$script" "$PROJECT_DIR/scripts/"
+                chmod +x "$PROJECT_DIR/scripts/$script"
+                log_info "Copied: $script"
+                ((scripts_copied++))
+            else
+                log_warn "Script not found: $script"
+            fi
+        done
+        
+        if [[ $scripts_copied -gt 0 ]]; then
+            log_info "Successfully copied $scripts_copied Python scripts"
+        else
+            log_error "No Python scripts were copied - pipeline may fail"
+            return 1
+        fi
+    else
+        log_error "Scripts directory not found: $deployment_dir/scripts"
+        log_error "Python scripts are required for the reconstruction pipeline"
+        return 1
     fi
     
-    log_info "Pipeline scripts set up"
+    # Verify critical scripts are in place
+    local critical_scripts=("bunny_cdn.py" "gsplat_trainer.py")
+    for script in "${critical_scripts[@]}"; do
+        if [[ ! -f "$PROJECT_DIR/scripts/$script" ]]; then
+            log_error "Critical script missing: $script"
+            log_error "Reconstruction pipeline will fail without this script"
+            return 1
+        fi
+    done
+    
+    log_info "Pipeline scripts set up successfully ✓"
 }
 
 create_status_script() {
