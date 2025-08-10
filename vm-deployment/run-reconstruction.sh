@@ -89,6 +89,26 @@ check_gpu() {
     fi
 }
 
+check_colmap_gpu_support() {
+    # Check if nvidia-smi is available and working
+    if ! command -v nvidia-smi &> /dev/null; then
+        return 1
+    fi
+    
+    # Check if GPU is detected
+    local gpu_count=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null || echo "0")
+    if [[ "$gpu_count" -eq 0 ]]; then
+        return 1
+    fi
+    
+    # Check if COLMAP supports GPU (test if it recognizes GPU parameters)
+    if colmap feature_extractor --help 2>&1 | grep -q "SiftExtraction.use_gpu"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 prepare_workspace() {
     log_step "Preparing workspace..."
     
@@ -220,12 +240,23 @@ run_colmap_reconstruction() {
     
     # Feature extraction
     log_info "Extracting features..."
+    
+    # Check GPU availability for COLMAP
+    local use_gpu=1
+    local gpu_index=0
+    
+    if ! check_colmap_gpu_support; then
+        log_warn "GPU not available or not supported by COLMAP - using CPU mode"
+        use_gpu=0
+        gpu_index=-1
+    fi
+    
     colmap feature_extractor \
         --database_path "$database" \
         --image_path "$DATA_DIR/images" \
         --ImageReader.camera_model "${COLMAP_CAMERA_MODEL:-RADIAL}" \
-        --SiftExtraction.use_gpu true \
-        --SiftExtraction.gpu_index 0
+        --SiftExtraction.use_gpu $use_gpu \
+        --SiftExtraction.gpu_index $gpu_index
     
     if [[ $? -ne 0 ]]; then
         log_error "Feature extraction failed"
@@ -237,15 +268,15 @@ run_colmap_reconstruction() {
     if [[ "${COLMAP_MATCHER_TYPE:-sequential}" == "exhaustive" ]]; then
         colmap exhaustive_matcher \
             --database_path "$database" \
-            --SiftMatching.use_gpu true \
-            --SiftMatching.gpu_index 0
+            --SiftMatching.use_gpu $use_gpu \
+            --SiftMatching.gpu_index $gpu_index
     elif [[ "${COLMAP_MATCHER_TYPE:-sequential}" == "sequential" ]]; then
         # Sequential matcher with vocabulary tree for loop detection
         log_info "Using sequential matcher with vocabulary tree..."
         colmap sequential_matcher \
             --database_path "$database" \
-            --SiftMatching.use_gpu true \
-            --SiftMatching.gpu_index 0 \
+            --SiftMatching.use_gpu $use_gpu \
+            --SiftMatching.gpu_index $gpu_index \
             --SequentialMatching.overlap 10 \
             --SequentialMatching.loop_detection 1 \
             --SequentialMatching.loop_detection_period 10 \
@@ -255,8 +286,8 @@ run_colmap_reconstruction() {
         # Fallback to vocabulary tree matcher
         colmap vocab_tree_matcher \
             --database_path "$database" \
-            --SiftMatching.use_gpu true \
-            --SiftMatching.gpu_index 0 \
+            --SiftMatching.use_gpu $use_gpu \
+            --SiftMatching.gpu_index $gpu_index \
             --VocabTreeMatching.vocab_tree_path "$CACHE_DIR/vocab_tree_flickr100K_words1M.bin"
     fi
     
