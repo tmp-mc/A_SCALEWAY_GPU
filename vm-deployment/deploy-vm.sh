@@ -23,50 +23,50 @@ log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 log_header() { echo -e "${BOLD}${CYAN}$1${NC}"; }
 
 detect_gpu_architecture() {
-    log_step "Detecting GPU architecture..."
+    echo "Detecting GPU architecture..." >&2
     
     if command -v nvidia-smi &> /dev/null; then
         local gpu_name
         if gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1) && [[ -n "$gpu_name" ]] && [[ ! "$gpu_name" =~ "Failed to initialize NVML" ]]; then
-            log_info "Detected GPU: $gpu_name"
+            echo "Detected GPU: $gpu_name" >&2
             
             case "$gpu_name" in
                 *"L4"*)
-                    log_info "L4 GPU detected - using compute capability 8.6"
+                    echo "L4 GPU detected - using compute capability 8.6" >&2
                     echo "86"
                     ;;
                 *"RTX 4090"*|*"RTX 4080"*|*"RTX 4070"*)
-                    log_info "RTX 40-series GPU detected - using compute capability 8.9"
+                    echo "RTX 40-series GPU detected - using compute capability 8.9" >&2
                     echo "89"
                     ;;
                 *"A100"*)
-                    log_info "A100 GPU detected - using compute capability 8.0"
+                    echo "A100 GPU detected - using compute capability 8.0" >&2
                     echo "80"
                     ;;
                 *"V100"*)
-                    log_info "V100 GPU detected - using compute capability 7.0"
+                    echo "V100 GPU detected - using compute capability 7.0" >&2
                     echo "70"
                     ;;
                 *"RTX 3090"*|*"RTX 3080"*|*"RTX 3070"*)
-                    log_info "RTX 30-series GPU detected - using compute capability 8.6"
+                    echo "RTX 30-series GPU detected - using compute capability 8.6" >&2
                     echo "86"
                     ;;
                 *"RTX 2080"*|*"RTX 2070"*)
-                    log_info "RTX 20-series GPU detected - using compute capability 7.5"
+                    echo "RTX 20-series GPU detected - using compute capability 7.5" >&2
                     echo "75"
                     ;;
                 *)
-                    log_warn "Unknown GPU model: $gpu_name"
-                    log_warn "Using 'native' architecture detection - CMake will auto-detect"
+                    echo "Unknown GPU model: $gpu_name" >&2
+                    echo "Using 'native' architecture detection - CMake will auto-detect" >&2
                     echo "native"
                     ;;
             esac
         else
-            log_warn "Could not query GPU name - using native architecture detection"
+            echo "Could not query GPU name - using native architecture detection" >&2
             echo "native"
         fi
     else
-        log_warn "nvidia-smi not available - using native architecture detection"
+        echo "nvidia-smi not available - using native architecture detection" >&2
         echo "native"
     fi
 }
